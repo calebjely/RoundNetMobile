@@ -39,6 +39,11 @@ export class SceneManager {
   private baseCamPos: THREE.Vector3;
   private baseCamTarget: THREE.Vector3;
   private currentZoomFactor = 1.0;
+  private currentCamPos = new THREE.Vector3();
+  private currentCamTarget = new THREE.Vector3();
+
+  private netArrowGroup!: THREE.Group;
+  private landingRingMesh!: THREE.Mesh;
 
   private proceduralEnvGroup: THREE.Group | null = null;
   private readonly gltfLoader = new GLTFLoader();
@@ -61,6 +66,8 @@ export class SceneManager {
     this.camera = new THREE.PerspectiveCamera(mapConfig.fov, width / height, 0.1, 150);
     this.baseCamPos = new THREE.Vector3(...mapConfig.cameraPosition);
     this.baseCamTarget = new THREE.Vector3(...mapConfig.cameraTarget);
+    this.currentCamPos.copy(this.baseCamPos);
+    this.currentCamTarget.copy(this.baseCamTarget);
     this.camera.position.copy(this.baseCamPos);
     this.camera.lookAt(this.baseCamTarget);
 
@@ -103,6 +110,8 @@ export class SceneManager {
     this.createCourtMarkings();
     this.netGroup = this.createOfficialNet();
     this.scene.add(this.netGroup);
+    this.createNetDirectionArrow();
+    this.createLandingCircle();
     this.ballMesh = this.createOfficialBall();
     this.scene.add(this.ballMesh);
 
@@ -560,6 +569,102 @@ export class SceneManager {
     return env;
   }
 
+  private createNetDirectionArrow(): void {
+    const group = new THREE.Group();
+    group.position.set(0, OFFICIAL_NET.netHeight + 0.035, 0);
+    group.visible = false;
+
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    // Shaft pointing along +Z
+    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.34), mat);
+    shaft.rotation.x = -Math.PI / 2;
+    shaft.position.z = 0.08;
+    group.add(shaft);
+
+    // Arrowhead cone/triangle pointing along +Z
+    const headShape = new THREE.Shape();
+    headShape.moveTo(0, 0.16);
+    headShape.lineTo(-0.12, -0.06);
+    headShape.lineTo(0.12, -0.06);
+    headShape.closePath();
+    const head = new THREE.Mesh(new THREE.ShapeGeometry(headShape), mat);
+    head.rotation.x = -Math.PI / 2;
+    head.position.z = 0.3;
+    group.add(head);
+
+    this.netArrowGroup = group;
+    this.scene.add(group);
+  }
+
+  private createLandingCircle(): void {
+    const geo = new THREE.RingGeometry(0.16, 0.25, 32);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xfacc15,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.016;
+    ring.visible = false;
+    this.landingRingMesh = ring;
+    this.scene.add(ring);
+  }
+
+  public updateBallIndicators(
+    ballPos: THREE.Vector3,
+    ballVel: THREE.Vector3,
+    isLive: boolean
+  ): void {
+    if (!isLive) {
+      this.netArrowGroup.visible = false;
+      this.landingRingMesh.visible = false;
+      return;
+    }
+
+    const horizSpeed = Math.hypot(ballVel.x, ballVel.z);
+    if (horizSpeed > 0.35) {
+      this.netArrowGroup.visible = true;
+      this.netArrowGroup.rotation.y = Math.atan2(ballVel.x, ballVel.z);
+      const scale = THREE.MathUtils.clamp(0.75 + horizSpeed * 0.08, 0.75, 1.45);
+      this.netArrowGroup.scale.set(1, 1, scale);
+    } else {
+      this.netArrowGroup.visible = false;
+    }
+
+    // Predict ground landing point (y = OFFICIAL_BALL.radius)
+    const y0 = ballPos.y;
+    const r = OFFICIAL_BALL.radius;
+    const g = OFFICIAL_BALL.gravity; // negative
+    if (y0 > r + 0.02) {
+      const a = 0.5 * g;
+      const b = ballVel.y;
+      const c = y0 - r;
+      const disc = b * b - 4 * a * c;
+      if (disc >= 0) {
+        const t = (-b - Math.sqrt(disc)) / (2 * a);
+        if (t > 0 && t < 5) {
+          const dragAtten = Math.exp(-OFFICIAL_BALL.linearDamping * t * 0.5);
+          const landX = ballPos.x + ballVel.x * t * dragAtten;
+          const landZ = ballPos.z + ballVel.z * t * dragAtten;
+          this.landingRingMesh.position.set(landX, 0.016, landZ);
+          this.landingRingMesh.visible = true;
+          return;
+        }
+      }
+    }
+    this.landingRingMesh.visible = false;
+  }
+
   public setCalibrateMode(enabled: boolean): void {
     this.calibrateMode = enabled;
     this.netPointers.clear();
@@ -704,10 +809,14 @@ export class SceneManager {
   }
 
   /**
-   * Press-box camera with Dynamic Zoom Guard:
-   * Smoothly eases camera slightly outward if a wide chase pushes any player near screen edge.
+   * Press-box camera with main focus on the net, blended with the ball,
+   * subtle panning & rotation, and Dynamic Zoom Guard.
    */
-  public updateCamera(trackedPoints: THREE.Vector3[], dt: number): void {
+  public updateCamera(
+    trackedPoints: THREE.Vector3[],
+    ballPos: THREE.Vector3,
+    dt: number
+  ): void {
     if (this.calibrateMode) {
       this.orbitControls.update();
       return;
@@ -725,12 +834,29 @@ export class SceneManager {
       targetZoom = Math.min(this.mapConfig.maxZoomOutFactor, 1.0 + (maxEdge - 0.78) * 1.35);
     }
 
-    const lerpRate = 1 - Math.exp(-dt * 3.5);
+    const lerpRate = 1 - Math.exp(-dt * 3.8);
     this.currentZoomFactor += (targetZoom - this.currentZoomFactor) * lerpRate;
 
-    const dir = this.baseCamPos.clone().sub(this.baseCamTarget);
-    this.camera.position.copy(this.baseCamTarget).addScaledVector(dir, this.currentZoomFactor);
-    this.camera.lookAt(this.baseCamTarget);
+    // Main focus on the net, blended gently toward the ball
+    const desiredTarget = this.baseCamTarget
+      .clone()
+      .lerp(new THREE.Vector3(ballPos.x, Math.max(0.35, ballPos.y * 0.5), ballPos.z), 0.3);
+
+    // Subtle panning & yaw rotation around the net following play
+    const baseOffset = this.baseCamPos.clone().sub(this.baseCamTarget).multiplyScalar(this.currentZoomFactor);
+    const yawAngle = THREE.MathUtils.clamp(ballPos.x * 0.032, -0.22, 0.22);
+    baseOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+
+    const desiredPos = this.baseCamTarget
+      .clone()
+      .add(baseOffset)
+      .add(new THREE.Vector3(ballPos.x * 0.22, 0, ballPos.z * 0.14));
+
+    this.currentCamTarget.lerp(desiredTarget, lerpRate);
+    this.currentCamPos.lerp(desiredPos, lerpRate);
+
+    this.camera.position.copy(this.currentCamPos);
+    this.camera.lookAt(this.currentCamTarget);
   }
 
   public render(): void {

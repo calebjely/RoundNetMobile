@@ -170,9 +170,15 @@ const App: React.FC = () => {
         sceneMgr.ballMesh.rotation.x += ballVel.z * dt * 2.5;
         sceneMgr.ballMesh.rotation.z -= ballVel.x * dt * 2.5;
 
+        const isBallLive =
+          matchMgr.phase === 'RALLY_LIVE' ||
+          matchMgr.phase === 'SERVE_IN_FLIGHT' ||
+          matchMgr.phase === 'SERVE_METER_ACTIVE';
+        sceneMgr.updateBallIndicators(ballPos, ballVel, isBallLive);
+
         const tracked = players.map((p) => p.position);
         tracked.push(ballPos);
-        sceneMgr.updateCamera(tracked, dt);
+        sceneMgr.updateCamera(tracked, ballPos, dt);
         sceneMgr.render();
 
         hudSyncAccum += dt;

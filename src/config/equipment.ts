@@ -31,9 +31,9 @@ export const OFFICIAL_NET: NetSpec = {
   rimTubeRadius: 0.022,
   netHeight: 0.203,
   legCount: 5,
-  netRestitution: 0.84,
-  netHorizontalDamping: 0.88,
-  rimRestitution: 0.72,
+  netRestitution: 0.94,
+  netHorizontalDamping: 1.05,
+  rimRestitution: 0.78,
   rimChaosFactor: 0.35,
 };
 
@@ -44,7 +44,7 @@ export const OFFICIAL_BALL: BallSpec = {
   colorHex: 0xfacc15,
   customTextureUrl: undefined,
   gravity: -8.35,
-  airDrag: 0.032,
-  linearDamping: 0.16,
+  airDrag: 0.014,
+  linearDamping: 0.05,
   groundRestitution: 0.48,
 };

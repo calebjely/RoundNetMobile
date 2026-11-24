@@ -145,7 +145,7 @@ export class BotController {
         OFFICIAL_NET.netHeight,
         (Math.random() - 0.5) * 0.26
       );
-      const flightTime = THREE.MathUtils.clamp(0.32 + distNet * 0.12, 0.3, 0.72);
+      const flightTime = THREE.MathUtils.clamp(0.25 + distNet * 0.1, 0.24, 0.56);
       const vel = computeBallisticVelocity(ballPos, target, flightTime);
       this.match.handleBotTouch(bot, vel, true);
     } else {

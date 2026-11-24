@@ -30,7 +30,7 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
     >
       <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-header">
-          <h2>RoundNetMobile</h2>
+          <h2>RoundNetMobile <span className="version-tag">v{__APP_VERSION__}</span></h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close menu">
             ✕
           </button>

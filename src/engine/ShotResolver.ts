@@ -94,7 +94,7 @@ export class ShotResolver {
         OFFICIAL_NET.netHeight - 0.02,
         (Math.random() - 0.5) * timingSpread
       );
-      const flightTime = THREE.MathUtils.lerp(0.28, 0.19, Math.min(1, powerRatio * powerMod));
+      const flightTime = THREE.MathUtils.lerp(0.24, 0.16, Math.min(1, powerRatio * powerMod));
       const velocity = computeBallisticVelocity(ballPos, target, flightTime);
       return {
         velocity,
@@ -246,7 +246,7 @@ export class ShotResolver {
     );
 
     // Swipe down = fast drive serve; swipe up = higher arc serve
-    const baseFlight = dirY > 0.3 ? 0.36 : dirY < -0.3 ? 0.54 : 0.43;
+    const baseFlight = dirY > 0.3 ? 0.31 : dirY < -0.3 ? 0.46 : 0.37;
     const flightTime = baseFlight / (0.9 + 0.1 * powerMod);
 
     return {
