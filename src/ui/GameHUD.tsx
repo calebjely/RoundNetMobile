@@ -1,0 +1,193 @@
+import React, { useState } from 'react';
+import { CourtOffsetConfig } from '../config/maps';
+import { JoystickVisualState } from '../engine/InputManager';
+import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
+import { CalibratorPanel } from './CalibratorPanel';
+import { MenuDrawer } from './MenuDrawer';
+
+interface GameHUDProps {
+  hud: MatchHUDState;
+  joystick: JoystickVisualState;
+  popups: TimingPopup[];
+  returnToNetActive: boolean;
+  onReturnToNetPress: (active: boolean) => void;
+  onResetRally: () => void;
+  onResetMatch: (pointsToWin: 15 | 21) => void;
+  calibrateMode: boolean;
+  onToggleCalibrate: () => void;
+  courtOffset: CourtOffsetConfig;
+  fov: number;
+  onChangeOffset: (next: CourtOffsetConfig) => void;
+  onChangeFov: (fov: number) => void;
+  onCopyViewConfig: () => string;
+}
+
+export const GameHUD: React.FC<GameHUDProps> = ({
+  hud,
+  joystick,
+  popups,
+  returnToNetActive,
+  onReturnToNetPress,
+  onResetRally,
+  onResetMatch,
+  calibrateMode,
+  onToggleCalibrate,
+  courtOffset,
+  fov,
+  onChangeOffset,
+  onChangeFov,
+  onCopyViewConfig,
+}) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const staminaPct = Math.max(
+    0,
+    Math.min(100, (hud.humanStamina / Math.max(1, hud.humanMaxStamina)) * 100)
+  );
+
+  return (
+    <div className="hud-root">
+      {/* Non-blocking Portrait Orientation Hint */}
+      <div className="portrait-hint">
+        Rotate to Landscape for Best Controls
+      </div>
+
+      {/* Top Center Scoreboard */}
+      <div className="scoreboard" data-ui-interactive="true">
+        <div className={`team-box team-a ${hud.servingTeam === 'A' ? 'serving' : ''}`}>
+          <span className="team-label">BLUE</span>
+          <span className="team-score">{hud.scoreA}</span>
+        </div>
+
+        <div className="match-meta">
+          <div className="meta-row">
+            <span className="badge server-badge">
+              {hud.serverName} · {hud.serveAttempt === 1 ? '1st' : '2nd'} Serve
+            </span>
+          </div>
+          <div className="meta-row">
+            <span className="touch-counter">
+              {hud.phase === 'RALLY_LIVE'
+                ? `Touches: ${hud.teamTouches}/3${hud.isFirstPossessionAfterServe ? ' (3 req)' : ''}`
+                : hud.isHumanServing
+                  ? 'Swipe Up on Right to Toss'
+                  : 'Ready'}
+            </span>
+          </div>
+        </div>
+
+        <div className={`team-box team-b ${hud.servingTeam === 'B' ? 'serving' : ''}`}>
+          <span className="team-score">{hud.scoreB}</span>
+          <span className="team-label">ORANGE</span>
+        </div>
+      </div>
+
+      {/* Top Right Menu Button */}
+      <button
+        data-ui-interactive="true"
+        className="menu-btn"
+        onClick={() => setMenuOpen(true)}
+      >
+        ☰ Menu
+      </button>
+
+      {/* Center Event Banner (Point, Fault, REDO) */}
+      {hud.bannerText && (
+        <div className={`center-banner tone-${hud.bannerTone}`}>
+          {hud.bannerText}
+        </div>
+      )}
+
+      {/* Golf-Style 2-Step Serve Timing Meter */}
+      {hud.serveMeterActive && (
+        <div className="serve-meter-wrap">
+          <div className="serve-meter-label">SWIPE TO SERVE!</div>
+          <div className="serve-meter-bar">
+            <div className="serve-meter-sweet" />
+            <div
+              className="serve-meter-cursor"
+              style={{ left: `${hud.serveMeterValue * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* World-Space Timing / Block / Redo Popups */}
+      {popups.map((p) => (
+        <div
+          key={p.id}
+          className={`timing-popup q-${p.quality.toLowerCase()}`}
+          style={{ left: p.screenX, top: p.screenY }}
+        >
+          {p.text}
+        </div>
+      ))}
+
+      {/* Bottom-Left Controls: Return to Net + Stamina + Virtual Joystick */}
+      <div className="bottom-left-cluster">
+        <button
+          data-ui-interactive="true"
+          className={`return-net-btn ${returnToNetActive ? 'active' : ''}`}
+          onPointerDown={() => onReturnToNetPress(true)}
+          onPointerUp={() => onReturnToNetPress(false)}
+          onPointerCancel={() => onReturnToNetPress(false)}
+        >
+          Return to Net
+        </button>
+
+        <div className="stamina-wrap">
+          <div className="stamina-label">
+            STAMINA {hud.humanExhausted ? '(RECOVERING)' : ''}
+          </div>
+          <div className="stamina-track">
+            <div
+              className={`stamina-fill ${hud.humanExhausted ? 'exhausted' : ''}`}
+              style={{ width: `${staminaPct}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Progressive Dual-Ring Virtual Joystick Visual */}
+      {joystick.active && (
+        <div
+          className="joystick-base"
+          style={{ left: joystick.originX, top: joystick.originY }}
+        >
+          <div className="joystick-walk-ring" />
+          <div
+            className={`joystick-thumb ${joystick.isSprint ? 'sprint' : ''}`}
+            style={{
+              transform: `translate(${joystick.thumbX - joystick.originX}px, ${joystick.thumbY - joystick.originY}px)`,
+            }}
+          />
+        </div>
+      )}
+
+      {/* Subtle Touch Hint on Bottom Right */}
+      <div className="right-zone-hint">
+        Swipe: Hit / Set / Spike · Hold: Block
+      </div>
+
+      <MenuDrawer
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onResetRally={onResetRally}
+        onResetMatch={onResetMatch}
+        pointsToWin={hud.pointsToWin}
+        calibrateMode={calibrateMode}
+        onToggleCalibrate={onToggleCalibrate}
+      />
+
+      <CalibratorPanel
+        visible={calibrateMode}
+        offset={courtOffset}
+        fov={fov}
+        onChangeOffset={onChangeOffset}
+        onChangeFov={onChangeFov}
+        onCopyViewConfig={onCopyViewConfig}
+        onExit={onToggleCalibrate}
+      />
+    </div>
+  );
+};
