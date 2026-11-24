@@ -41,19 +41,19 @@ export const TEAM_COLORS: Record<TeamId, { primary: string; hex: number; ringHex
 export const USER_HIGHLIGHT_HEX = 0xfacc15;
 
 export const MOVEMENT_TUNING = {
-  baseWalkSpeed: 3.1,      // m/s
-  baseFastWalkSpeed: 4.0,  // m/s (cap when exhausted)
-  baseSprintSpeed: 6.4,    // m/s
+  baseWalkSpeed: 3.6,      // m/s
+  baseFastWalkSpeed: 4.6,  // m/s (cap when exhausted)
+  baseSprintSpeed: 7.0,    // m/s
   maxStamina: 100,
-  staminaDrainPerSec: 26,
-  staminaRegenPerSec: 18,
+  staminaDrainPerSec: 22,
+  staminaRegenPerSec: 20,
   staminaRecoverThreshold: 15,
-  diveSpeedBoost: 7.5,     // m/s burst
-  diveDuration: 0.42,      // s
-  getUpDuration: 0.55,     // s
-  blockReachRadius: 0.85,  // m
-  hitReachRadius: 1.35,    // m
-  diveReachBonus: 0.55,    // m extra reach during dive window
+  diveSpeedBoost: 8.2,     // m/s burst
+  diveDuration: 0.38,      // s
+  getUpDuration: 0.45,     // s
+  blockReachRadius: 0.9,   // m
+  hitReachRadius: 1.65,    // m
+  diveReachBonus: 0.65,    // m extra reach during dive window
   playerRadius: 0.34,      // m
   playerHeight: 1.78,      // m
 };

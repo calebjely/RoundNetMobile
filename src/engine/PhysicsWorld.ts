@@ -25,6 +25,10 @@ export class PhysicsWorld {
   private groundHitCooldown = 0;
   private obstacleHitCooldown = 0;
 
+  private prevBallPos = new THREE.Vector3();
+  private prevBallVel = new THREE.Vector3();
+  private ballFrozen = false;
+
   public async init(callbacks: PhysicsCallbacks = {}): Promise<void> {
     this.callbacks = callbacks;
     await RAPIER.init();
@@ -49,12 +53,12 @@ export class PhysicsWorld {
     const { rimRadius, rimTubeRadius, netHeight, legCount } = OFFICIAL_NET;
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
 
-    // Trampoline netting disc
-    const netDiscRadius = rimRadius - rimTubeRadius * 0.9;
-    const netColDesc = RAPIER.ColliderDesc.cylinder(0.012, netDiscRadius)
+    // Trampoline netting disc is handled via continuous plane-crossing detection
+    // so Rapier never kills incoming downward velocity before elastic rebound!
+    const netDiscRadius = rimRadius - rimTubeRadius * 1.1;
+    const netColDesc = RAPIER.ColliderDesc.cylinder(0.01, netDiscRadius)
       .setTranslation(0, netHeight, 0)
-      .setRestitution(0.1) // Handled manually for crisp elastic trampoline rebound
-      .setFriction(0.15);
+      .setSensor(true);
     const netCol = this.world.createCollider(netColDesc, body);
     this.colliderTags.set(netCol.handle, 'net');
 
@@ -68,8 +72,15 @@ export class PhysicsWorld {
       const cx = Math.cos(midA) * rimRadius;
       const cz = Math.sin(midA) * rimRadius;
 
-      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -midA + Math.PI / 2);
-      const rimColDesc = RAPIER.ColliderDesc.cuboid(segLen * 0.52, rimTubeRadius, rimTubeRadius)
+      const q = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        -midA + Math.PI / 2
+      );
+      const rimColDesc = RAPIER.ColliderDesc.cuboid(
+        segLen * 0.5,
+        rimTubeRadius * 0.85,
+        rimTubeRadius * 0.85
+      )
         .setTranslation(cx, netHeight, cz)
         .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
         .setRestitution(OFFICIAL_NET.rimRestitution)
@@ -78,10 +89,10 @@ export class PhysicsWorld {
       this.colliderTags.set(rimCol.handle, 'rim');
     }
 
-    // 5 Radial Legs (also rim-tagged so hitting side of set deflects unpredictably)
+    // 5 Radial Legs (rim-tagged so hitting side of set deflects unpredictably)
     for (let i = 0; i < legCount; i++) {
       const angle = (i / legCount) * Math.PI * 2;
-      const legColDesc = RAPIER.ColliderDesc.cylinder(netHeight * 0.5, 0.022)
+      const legColDesc = RAPIER.ColliderDesc.cylinder(netHeight * 0.5, 0.02)
         .setTranslation(Math.cos(angle) * rimRadius, netHeight * 0.5, Math.sin(angle) * rimRadius)
         .setRestitution(OFFICIAL_NET.rimRestitution);
       const legCol = this.world.createCollider(legColDesc, body);
@@ -106,7 +117,6 @@ export class PhysicsWorld {
   }
 
   public registerEnvironmentColliders(root: THREE.Object3D): void {
-    // Clear previous env colliders if reloading
     for (const c of this.envColliders) {
       this.colliderTags.delete(c.handle);
       this.world.removeCollider(c, true);
@@ -119,7 +129,7 @@ export class PhysicsWorld {
 
     root.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh) || !obj.geometry) return;
-      if (obj.name === 'ground_lawn') return; // Handled by clean ground plane
+      if (obj.name === 'ground_lawn') return;
 
       const geo = obj.geometry as THREE.BufferGeometry;
       const posAttr = geo.getAttribute('position');
@@ -152,9 +162,13 @@ export class PhysicsWorld {
   }
 
   public setBallState(pos: THREE.Vector3, vel: THREE.Vector3, wake = true): void {
+    this.ballFrozen = !wake;
+    this.ballBody.setGravityScale(wake ? 1.0 : 0.0, wake);
     this.ballBody.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, wake);
     this.ballBody.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, wake);
     this.ballBody.setAngvel({ x: 0, y: 0, z: 0 }, wake);
+    this.prevBallPos.copy(pos);
+    this.prevBallVel.copy(vel);
   }
 
   public getBallPosition(out = new THREE.Vector3()): THREE.Vector3 {
@@ -173,13 +187,19 @@ export class PhysicsWorld {
     this.groundHitCooldown = Math.max(0, this.groundHitCooldown - dt);
     this.obstacleHitCooldown = Math.max(0, this.obstacleHitCooldown - dt);
 
-    // Aerodynamic quadratic drag for realistic hang-time on passes/sets while keeping spikes crisp
-    const vel = this.ballBody.linvel();
-    const speed = Math.hypot(vel.x, vel.y, vel.z);
+    if (this.ballFrozen) return;
+
+    const p0 = this.ballBody.translation();
+    const v0 = this.ballBody.linvel();
+    this.prevBallPos.set(p0.x, p0.y, p0.z);
+    this.prevBallVel.set(v0.x, v0.y, v0.z);
+
+    // Light realistic aerodynamic drag
+    const speed = Math.hypot(v0.x, v0.y, v0.z);
     if (speed > 0.05) {
-      const dragFactor = 1 - Math.min(0.25, OFFICIAL_BALL.airDrag * speed * dt);
+      const dragFactor = 1 - Math.min(0.18, OFFICIAL_BALL.airDrag * speed * dt);
       this.ballBody.setLinvel(
-        { x: vel.x * dragFactor, y: vel.y * dragFactor, z: vel.z * dragFactor },
+        { x: v0.x * dragFactor, y: v0.y * dragFactor, z: v0.z * dragFactor },
         true
       );
     }
@@ -187,7 +207,50 @@ export class PhysicsWorld {
     this.world.timestep = Math.min(dt, 1 / 60);
     this.world.step();
 
+    // 1. Continuous net trampoline plane crossing (prevents Rapier restitution killing vy!)
+    if (this.checkNetTrampolineCrossing()) {
+      return;
+    }
+
+    // 2. Rigid contacts (rim, ground, obstacles)
     this.processContacts();
+  }
+
+  private checkNetTrampolineCrossing(): boolean {
+    if (this.netHitCooldown > 0) return false;
+
+    const curPos = this.ballBody.translation();
+    const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
+    const netDiscRadius = OFFICIAL_NET.rimRadius - OFFICIAL_NET.rimTubeRadius * 0.7;
+
+    // Ball crossed downward through the net surface plane
+    if (this.prevBallPos.y >= netPlaneY - 0.04 && curPos.y <= netPlaneY && this.prevBallVel.y < -0.15) {
+      const dy = curPos.y - this.prevBallPos.y;
+      const alpha = Math.abs(dy) > 0.0001 ? THREE.MathUtils.clamp((netPlaneY - this.prevBallPos.y) / dy, 0, 1) : 0.5;
+      const hitX = THREE.MathUtils.lerp(this.prevBallPos.x, curPos.x, alpha);
+      const hitZ = THREE.MathUtils.lerp(this.prevBallPos.z, curPos.z, alpha);
+      const hitR = Math.hypot(hitX, hitZ);
+
+      if (hitR <= netDiscRadius) {
+        this.netHitCooldown = 0.14;
+        const incomingSpeed = this.prevBallVel.length();
+        const incomingDownVy = Math.abs(this.prevBallVel.y);
+
+        // True elastic trampoline rebound:
+        // Steep downward spikes pop HIGH; flatter serves rebound cleanly at receiver height;
+        // horizontal speed slows slightly off the elastic mesh so receivers can play it!
+        const outVy = Math.max(2.6, incomingDownVy * OFFICIAL_NET.netRestitution);
+        const outVx = this.prevBallVel.x * OFFICIAL_NET.netHorizontalDamping;
+        const outVz = this.prevBallVel.z * OFFICIAL_NET.netHorizontalDamping;
+
+        this.ballBody.setTranslation({ x: hitX, y: netPlaneY + 0.015, z: hitZ }, true);
+        this.ballBody.setLinvel({ x: outVx, y: outVy, z: outVz }, true);
+        this.callbacks.onNetHit?.(hitX, hitZ, incomingSpeed);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private processContacts(): void {
@@ -197,62 +260,36 @@ export class PhysicsWorld {
 
     this.world.contactPairsWith(this.ballCollider, (other) => {
       const tag = this.colliderTags.get(other.handle);
-      if (!tag) return;
+      if (!tag || tag === 'net') return;
 
-      if (tag === 'net' && this.netHitCooldown <= 0) {
-        if (ballVel.y < -0.05) {
-          this.netHitCooldown = 0.12;
-          // Fast incoming shots slow horizontally off the net and pop high into a real arc
-          const newVy = Math.max(
-            3.8,
-            Math.abs(ballVel.y) * OFFICIAL_NET.netRestitution + speed * 0.22
-          );
-          this.ballBody.setLinvel(
-            {
-              x: ballVel.x * OFFICIAL_NET.netHorizontalDamping,
-              y: newVy,
-              z: ballVel.z * OFFICIAL_NET.netHorizontalDamping,
-            },
-            true
-          );
-          this.ballBody.setTranslation(
-            {
-              x: ballPos.x,
-              y: Math.max(ballPos.y, OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius + 0.015),
-              z: ballPos.z,
-            },
-            true
-          );
-          this.callbacks.onNetHit?.(ballPos.x, ballPos.z, speed);
-        }
-      } else if (tag === 'rim' && this.rimHitCooldown <= 0) {
-        this.rimHitCooldown = 0.12;
+      if (tag === 'rim' && this.rimHitCooldown <= 0) {
+        this.rimHitCooldown = 0.14;
         const chaos = OFFICIAL_NET.rimChaosFactor;
+        const inSpeed = Math.max(speed, this.prevBallVel.length());
         this.ballBody.setLinvel(
           {
-            x: ballVel.x + (Math.random() - 0.5) * speed * chaos,
-            y: Math.max(1.2, Math.abs(ballVel.y) * OFFICIAL_NET.rimRestitution),
-            z: ballVel.z + (Math.random() - 0.5) * speed * chaos,
+            x: ballVel.x + (Math.random() - 0.5) * inSpeed * chaos,
+            y: Math.max(1.8, Math.abs(this.prevBallVel.y) * OFFICIAL_NET.rimRestitution),
+            z: ballVel.z + (Math.random() - 0.5) * inSpeed * chaos,
           },
           true
         );
-        this.callbacks.onRimHit?.(ballPos.x, ballPos.z, speed);
+        this.callbacks.onRimHit?.(ballPos.x, ballPos.z, inSpeed);
       } else if (tag === 'obstacle' && this.obstacleHitCooldown <= 0) {
         this.obstacleHitCooldown = 0.2;
         this.callbacks.onObstacleHit?.(ballPos.x, ballPos.y, ballPos.z);
       } else if (tag === 'env') {
-        // Classify env triangle by elevation/steepness: elevated outside net = obstacle, low flat = ground
         const distFromNet = Math.hypot(ballPos.x, ballPos.z);
         const isElevatedObstacle = ballPos.y > 0.35 && distFromNet > OFFICIAL_NET.rimRadius + 0.25;
         if (isElevatedObstacle && this.obstacleHitCooldown <= 0) {
           this.obstacleHitCooldown = 0.2;
           this.callbacks.onObstacleHit?.(ballPos.x, ballPos.y, ballPos.z);
-        } else if (!isElevatedObstacle && this.groundHitCooldown <= 0 && ballVel.y < 0.2) {
-          this.groundHitCooldown = 0.15;
+        } else if (!isElevatedObstacle && this.groundHitCooldown <= 0 && ballPos.y <= OFFICIAL_BALL.radius + 0.08) {
+          this.groundHitCooldown = 0.18;
           this.callbacks.onGroundHit?.(ballPos.x, ballPos.z, speed);
         }
       } else if (tag === 'ground' && this.groundHitCooldown <= 0 && ballPos.y <= OFFICIAL_BALL.radius + 0.08) {
-        this.groundHitCooldown = 0.15;
+        this.groundHitCooldown = 0.18;
         this.callbacks.onGroundHit?.(ballPos.x, ballPos.z, speed);
       }
     });

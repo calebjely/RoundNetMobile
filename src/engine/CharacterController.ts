@@ -276,6 +276,7 @@ export class CharacterController {
   }
 
   private createNameplate(): void {
+    if (typeof document === 'undefined') return;
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 64;

@@ -4,7 +4,7 @@ import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import { IRF_2026_RULES } from '../config/rules';
 import { CharacterController } from './CharacterController';
 import { PhysicsWorld } from './PhysicsWorld';
-import { ShotResolver, TimingQuality } from './ShotResolver';
+import { computeBallisticVelocity, ShotResolver, TimingQuality } from './ShotResolver';
 import { SwipeEvent } from './InputManager';
 
 export type RallyPhase =
@@ -55,8 +55,7 @@ export class MatchManager {
   public scoreB = 0;
   public pointsToWin: 15 | 21 = IRF_2026_RULES.pointsToWin;
 
-  // Equal Serving Rotation:
-  // Order of servers: [0 (Team A), 2 (Team B), 1 (Team A), 3 (Team B)]
+  // IRF Equal Serving Rotation: [0 (Team A), 2 (Team B), 1 (Team A), 3 (Team B)]
   private readonly serveRotation = [0, 2, 1, 3];
   private rotationCursor = 0;
   private isVeryFirstServeOfMatch = true;
@@ -68,8 +67,9 @@ export class MatchManager {
   public lastTouchPlayerIdx = -1;
   public lastAttackTeam: TeamId | null = null;
   public isFirstPossessionAfterServe = false;
-  private serveHitNet = false;
-  private serveReboundedOffNet = false;
+
+  public serveHitNet = false;
+  public serveReboundedOffNet = false;
   private servePeakAfterNet = 0;
   private serveFaultPendingReason: string | null = null;
 
@@ -131,13 +131,25 @@ export class MatchManager {
     this.setupServe();
   }
 
+  private getServerHandPos(server: CharacterController): THREE.Vector3 {
+    const toNet = new THREE.Vector3(-server.position.x, 0, -server.position.z);
+    if (toNet.lengthSq() > 0.001) toNet.normalize();
+    const right = new THREE.Vector3(-toNet.z, 0, toNet.x);
+    return server.position
+      .clone()
+      .addScaledVector(toNet, 0.3)
+      .addScaledVector(right, 0.2)
+      .add(new THREE.Vector3(0, 1.15, 0));
+  }
+
   private setupServe(): void {
     this.players.forEach((p) => p.resetToStart());
     const server = this.getCurrentServer();
 
-    // Ensure server starts behind 2.60 m service line
-    const sideSign = server.team === 'A' ? 1 : -1;
-    server.position.set(0, 0, sideSign * (IRF_2026_RULES.serviceLineRadius + 0.25));
+    // Place server centered in their own 90° quarter slice behind the 2.60 m service line
+    const angle = server.config.quarterCenterAngle;
+    const serveR = IRF_2026_RULES.serviceLineRadius + 0.3;
+    server.position.set(Math.sin(angle) * serveR, 0, Math.cos(angle) * serveR);
     server.facingAngle = Math.atan2(-server.position.x, -server.position.z);
     server.root.position.copy(server.position);
     server.root.rotation.y = server.facingAngle;
@@ -154,50 +166,51 @@ export class MatchManager {
     this.serveMeterValue = 0.1;
     this.serveMeterDir = 1;
     this.phase = 'SERVE_WAIT_TOSS';
-    this.botServeDelay = 1.05;
+    this.botServeDelay = 0.9;
     this.bannerText = `${server.config.profile.name} to Serve (${this.serveAttempt === 1 ? '1st' : '2nd'} Attempt)`;
     this.bannerTone = 'info';
 
-    // Hold ball in server's hand
-    const handPos = server.position.clone().add(new THREE.Vector3(0.22, 1.15, -sideSign * 0.25));
-    this.physics.setBallState(handPos, new THREE.Vector3(0, 0, 0), false);
+    this.physics.setBallState(this.getServerHandPos(server), new THREE.Vector3(0, 0, 0), false);
   }
 
-  public handleHumanSwipe(swipe: SwipeEvent): void {
+  public handleHumanSwipe(
+    swipe: SwipeEvent,
+    camRight = new THREE.Vector3(1, 0, 0)
+  ): void {
     const human = this.players.find((p) => p.isHuman);
     if (!human) return;
 
     if (this.phase === 'SERVE_WAIT_TOSS' && this.getCurrentServer() === human) {
       // Step 1: Swipe Up to toss ball
-      if (swipe.dy < -18) {
+      if (swipe.dy < -16) {
         const tossVel = ShotResolver.resolveServeToss(human);
-        const startPos = human.position.clone().add(new THREE.Vector3(0.15, 1.25, -0.25));
+        const startPos = this.getServerHandPos(human);
         this.physics.setBallState(startPos, tossVel, true);
         human.setAnimState('serve_toss', 0.45);
         this.phase = 'SERVE_METER_ACTIVE';
-        this.serveMeterValue = 0.05;
+        this.serveMeterValue = 0.08;
         this.serveMeterDir = 1;
-        this.bannerText = 'SWIPE IN SWEET SPOT!';
+        this.bannerText = 'SWIPE IN GREEN SWEET SPOT!';
         this.bannerTone = 'info';
       }
       return;
     }
 
     if (this.phase === 'SERVE_METER_ACTIVE' && this.getCurrentServer() === human) {
-      // Step 2: Strike serve using golf timing meter
+      // Check service line foot fault (server must stay behind 2.60 m)
+      if (Math.hypot(human.position.x, human.position.z) < IRF_2026_RULES.serviceLineRadius - 0.03) {
+        this.triggerServeFault('Foot Fault (Service Line)');
+        return;
+      }
+
       const ballPos = this.physics.getBallPosition();
       const { velocity, quality, isShank } = ShotResolver.resolveServeStrike(
         human,
         ballPos,
         swipe,
-        this.serveMeterValue
+        this.serveMeterValue,
+        camRight
       );
-
-      // Check service line foot fault (server must stay behind 2.60 m)
-      if (Math.hypot(human.position.x, human.position.z) < IRF_2026_RULES.serviceLineRadius) {
-        this.triggerServeFault('Foot Fault (Service Line)');
-        return;
-      }
 
       this.physics.setBallState(ballPos, velocity, true);
       human.setAnimState('serve_hit', 0.4);
@@ -207,14 +220,21 @@ export class MatchManager {
       return;
     }
 
-    if (
-      this.phase === 'RALLY_LIVE' ||
-      (this.phase === 'SERVE_IN_FLIGHT' && this.serveReboundedOffNet && human.team !== this.getServingTeam())
-    ) {
+    const canReceiveServe =
+      this.phase === 'SERVE_IN_FLIGHT' &&
+      this.serveReboundedOffNet &&
+      human.team !== this.getServingTeam();
+
+    if (this.phase === 'RALLY_LIVE' || canReceiveServe) {
       const ballPos = this.physics.getBallPosition();
       const ballVel = this.physics.getBallVelocity();
 
-      // Consecutive touch check (cannot hit twice in a row on same team unless Touch 1 block)
+      // Only the team with possession can play the ball (unless blocking at net)
+      if (this.phase === 'RALLY_LIVE' && this.possessionTeam !== human.team) {
+        return;
+      }
+
+      // Consecutive touch check (cannot hit twice in a row on same team)
       if (
         this.phase === 'RALLY_LIVE' &&
         this.possessionTeam === human.team &&
@@ -224,7 +244,7 @@ export class MatchManager {
       }
 
       const isServeReceive = this.phase === 'SERVE_IN_FLIGHT';
-      const nextTouches = isServeReceive ? 1 : this.possessionTeam === human.team ? this.teamTouches + 1 : 1;
+      const nextTouches = isServeReceive ? 1 : this.teamTouches + 1;
       if (nextTouches > 3) return;
 
       const teammate = this.players.find(
@@ -236,19 +256,21 @@ export class MatchManager {
         ballPos,
         ballVel,
         swipe,
-        nextTouches
+        nextTouches,
+        isServeReceive || this.isFirstPossessionAfterServe,
+        camRight
       );
       if (!outcome) return;
 
       if (isServeReceive) {
         this.phase = 'RALLY_LIVE';
+        this.possessionTeam = human.team;
         this.isFirstPossessionAfterServe = true;
       }
 
-      // Early return fault on 1st possession after serve
+      // Early return fault on 1st possession after serve (must use all 3 touches!)
       if (
         this.isFirstPossessionAfterServe &&
-        this.possessionTeam === human.team &&
         outcome.isAttackAtNet &&
         nextTouches < 3
       ) {
@@ -289,18 +311,16 @@ export class MatchManager {
   ): void {
     if (this.phase !== 'RALLY_LIVE' && this.phase !== 'SERVE_IN_FLIGHT') return;
     if (this.phase === 'SERVE_IN_FLIGHT') {
-      if (!this.serveReboundedOffNet) return;
+      if (!this.serveReboundedOffNet || bot.team === this.getServingTeam()) return;
       this.phase = 'RALLY_LIVE';
       this.possessionTeam = bot.team;
       this.teamTouches = 1;
       this.isFirstPossessionAfterServe = true;
-    } else if (this.possessionTeam !== bot.team) {
-      this.possessionTeam = bot.team;
-      this.teamTouches = 1;
-      this.isFirstPossessionAfterServe = false;
     } else {
+      if (this.possessionTeam !== bot.team) return;
       if (this.lastTouchPlayerIdx === bot.config.slotIndex) return;
-      this.teamTouches = Math.min(3, this.teamTouches + 1);
+      if (this.teamTouches >= 3) return;
+      this.teamTouches += 1;
     }
 
     if (isAttackAtNet) {
@@ -320,15 +340,22 @@ export class MatchManager {
       if (!this.serveHitNet) {
         this.serveHitNet = true;
         this.serveReboundedOffNet = true;
-        this.servePeakAfterNet = OFFICIAL_NET.netHeight;
+        this.servePeakAfterNet = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
       } else {
-        // Double bounce on net during serve
         this.triggerServeFault('Double Bounce on Serve');
       }
       return;
     }
 
     if (this.phase === 'RALLY_LIVE') {
+      // Double bounce on net without being touched
+      if (this.teamTouches === 0 && this.lastTouchPlayerIdx === -1) {
+        // Ball bounced twice on net -> hitting team loses point
+        const defendingTeam = this.possessionTeam;
+        this.awardPoint(defendingTeam, 'Double Bounce on Net!');
+        return;
+      }
+
       // Check follow-through NHZ fault for last attacker
       const lastHitter = this.players.find((p) => p.config.slotIndex === this.lastTouchPlayerIdx);
       if (lastHitter && lastHitter.hasActiveNHZFollowThrough() && lastHitter.isInsideNHZ()) {
@@ -336,12 +363,21 @@ export class MatchManager {
         return;
       }
 
-      // Ball hit net -> possession flips to opposing team
+      // Enforce 3-touch rule on first possession after serve
+      if (this.isFirstPossessionAfterServe && this.teamTouches < 3) {
+        this.awardPoint(
+          this.possessionTeam === 'A' ? 'B' : 'A',
+          'Must use 3 touches on serve receive!'
+        );
+        return;
+      }
+
+      // Ball legally struck net -> possession flips to opposing team
       const hittingTeam = this.lastAttackTeam ?? this.possessionTeam;
       this.possessionTeam = hittingTeam === 'A' ? 'B' : 'A';
       this.teamTouches = 0;
       this.lastTouchPlayerIdx = -1;
-      this.lastAttackTeam = null;
+      this.lastAttackTeam = hittingTeam;
       this.isFirstPossessionAfterServe = false;
     }
   }
@@ -354,7 +390,10 @@ export class MatchManager {
       return;
     }
     if (this.phase === 'RALLY_LIVE') {
-      this.spawnPopup(new THREE.Vector3(x, OFFICIAL_NET.netHeight + 0.1, z), 'RIM!', 'Info');
+      this.spawnPopup(new THREE.Vector3(x, OFFICIAL_NET.netHeight + 0.15, z), 'RIM FAULT!', 'Fault');
+      // IRF rule: hitting the rim on an attack is a fault for the hitting team
+      const hittingTeam = this.teamTouches > 0 ? this.possessionTeam : (this.lastAttackTeam ?? 'A');
+      this.awardPoint(hittingTeam === 'A' ? 'B' : 'A', 'Rim Fault!');
     }
   }
 
@@ -372,10 +411,8 @@ export class MatchManager {
       if (!this.serveReboundedOffNet) {
         this.triggerServeFault('Serve Missed Net');
       } else if (dist <= IRF_2026_RULES.noHitZoneRadius) {
-        // IRF "No-Drop" rule: serve landing inside 1.00 m NHZ is a fault
         this.triggerServeFault('Serve Short (NHZ Drop Fault)');
       } else {
-        // Clean Ace!
         this.awardPoint(this.getServingTeam(), 'SERVICE ACE!');
       }
       return;
@@ -391,15 +428,9 @@ export class MatchManager {
         return;
       }
 
-      // If teamTouches === 0, ball just rebounded off net and receiving team failed to reach it
-      if (this.teamTouches === 0) {
-        const winner = this.possessionTeam === 'A' ? 'B' : 'A';
-        this.awardPoint(winner, 'Clean Point!');
-      } else {
-        // Ball dropped while possessionTeam was trying to pass/set
-        const winner = this.possessionTeam === 'A' ? 'B' : 'A';
-        this.awardPoint(winner, 'Ball Hit Ground!');
-      }
+      // If teamTouches === 0, defending team (possessionTeam) failed to reach the rebound
+      const winner = this.possessionTeam === 'A' ? 'B' : 'A';
+      this.awardPoint(winner, this.teamTouches === 0 ? 'Clean Point!' : 'Ball Hit Ground!');
     }
   }
 
@@ -407,27 +438,27 @@ export class MatchManager {
     if (!IRF_2026_RULES.outsideInterferenceRedo) return;
     if (this.phase !== 'RALLY_LIVE' && this.phase !== 'SERVE_IN_FLIGHT') return;
 
-    // If serve faulted BEFORE reaching the net/obstacle, fault resolves first
     if (this.phase === 'SERVE_IN_FLIGHT' && !this.serveReboundedOffNet) {
       this.triggerServeFault('Serve Missed Net');
       return;
     }
 
-    // Outside Interference -> REDO!
     this.phase = 'REDO_BANNER';
-    this.phaseTimer = 1.9;
+    this.phaseTimer = 1.8;
     this.bannerText = 'REDO — Outside Interference';
     this.bannerTone = 'redo';
-    this.serveAttempt = 1; // Reset current server to 1st serve
+    this.serveAttempt = 1;
     this.spawnPopup(new THREE.Vector3(x, y, z), 'REDO!', 'Redo');
   }
 
   private triggerServeFault(reason: string): void {
-    if (this.phase === 'POINT_OVER' || this.phase === 'REDO_BANNER') return;
+    if (this.phase === 'POINT_OVER' || this.phase === 'REDO_BANNER' || this.phase === 'MATCH_OVER') {
+      return;
+    }
     if (this.serveAttempt === 1) {
       this.serveAttempt = 2;
       this.phase = 'POINT_OVER';
-      this.phaseTimer = 1.25;
+      this.phaseTimer = 1.2;
       this.bannerText = `FAULT: ${reason} — 2nd Serve`;
       this.bannerTone = 'fault';
     } else {
@@ -441,7 +472,6 @@ export class MatchManager {
     if (winnerTeam === 'A') this.scoreA += 1;
     else this.scoreB += 1;
 
-    // Check Win Condition (15 or 21, win by 2)
     const high = Math.max(this.scoreA, this.scoreB);
     const diff = Math.abs(this.scoreA - this.scoreB);
     if (high >= this.pointsToWin && (!IRF_2026_RULES.winByTwo || diff >= 2)) {
@@ -452,7 +482,7 @@ export class MatchManager {
       return;
     }
 
-    // Advance IRF Equal Serving rotation
+    // IRF Equal Serving rotation
     this.servePointsRemaining -= 1;
     if (this.servePointsRemaining <= 0) {
       this.rotationCursor = (this.rotationCursor + 1) % this.serveRotation.length;
@@ -464,7 +494,7 @@ export class MatchManager {
 
     this.serveAttempt = 1;
     this.phase = 'POINT_OVER';
-    this.phaseTimer = 1.6;
+    this.phaseTimer = 1.5;
     this.bannerText = `${winnerTeam === 'A' ? 'Blue' : 'Orange'} Point! (${reason})`;
     this.bannerTone = 'point';
   }
@@ -473,24 +503,22 @@ export class MatchManager {
     const ballPos = this.physics.getBallPosition();
     const ballVel = this.physics.getBallVelocity();
 
-    // Prune popups older than 0.9s
     const now = performance.now();
     this.popups = this.popups.filter((p) => now - p.createdAt < 900);
 
-    // Block collider check for human & bots
+    // Block collider check for human & bots at net
     if (this.phase === 'RALLY_LIVE') {
       for (const p of this.players) {
         if (!p.isBlocking) continue;
         const d = Math.hypot(ballPos.x - p.position.x, ballPos.z - p.position.z);
-        if (d < 0.78 && ballPos.y >= 0.85 && ballPos.y <= 2.15 && this.possessionTeam !== p.team) {
-          // Clean upward block pop!
+        if (d < 0.85 && ballPos.y >= 0.8 && ballPos.y <= 2.15 && this.possessionTeam !== p.team) {
           this.possessionTeam = p.team;
           this.teamTouches = 1;
           this.lastTouchPlayerIdx = p.config.slotIndex;
           this.isFirstPossessionAfterServe = false;
           this.physics.setBallState(
             ballPos,
-            new THREE.Vector3(-ballVel.x * 0.25, 4.6, -ballVel.z * 0.25),
+            new THREE.Vector3(-ballVel.x * 0.25, 5.1, -ballVel.z * 0.25),
             true
           );
           this.spawnPopup(ballPos, 'BLOCK!', 'Perfect');
@@ -507,7 +535,6 @@ export class MatchManager {
         return;
       }
 
-      // Rebounding off net into server or server's partner = immediate loss of point
       const servingTeam = this.getServingTeam();
       for (const p of this.players) {
         if (p.team !== servingTeam) continue;
@@ -519,9 +546,9 @@ export class MatchManager {
       }
     }
 
-    // Golf-style timing meter oscillation
+    // Golf-style timing meter oscillation (smooth, readable pace)
     if (this.phase === 'SERVE_METER_ACTIVE') {
-      this.serveMeterValue += this.serveMeterDir * dt * 1.65;
+      this.serveMeterValue += this.serveMeterDir * dt * 1.35;
       if (this.serveMeterValue >= 1) {
         this.serveMeterValue = 1;
         this.serveMeterDir = -1;
@@ -538,32 +565,22 @@ export class MatchManager {
     // Keep ball pinned in server's hand while waiting for toss
     const server = this.getCurrentServer();
     if (this.phase === 'SERVE_WAIT_TOSS') {
-      const sideSign = server.team === 'A' ? 1 : -1;
-      const handPos = server.position.clone().add(new THREE.Vector3(0.22, 1.15, -sideSign * 0.25));
-      this.physics.setBallState(handPos, new THREE.Vector3(0, 0, 0), false);
+      this.physics.setBallState(this.getServerHandPos(server), new THREE.Vector3(0, 0, 0), false);
     }
 
-    // Bot server auto-serve
+    // Bot server auto-serve: calibrated fast, legal serve across the net
     if (this.phase === 'SERVE_WAIT_TOSS' && !server.isHuman) {
       this.botServeDelay -= dt;
       if (this.botServeDelay <= 0) {
-        const startPos = server.position.clone().add(new THREE.Vector3(0.15, 1.25, 0));
-        const target = new THREE.Vector3((Math.random() - 0.5) * 0.16, OFFICIAL_NET.netHeight, 0);
-        const vel = ShotResolver.resolveServeStrike(
-          server,
-          startPos,
-          { dx: 0, dy: -60, distancePx: 60, speedPxPerSec: 800, startX: 0, startY: 0 },
-          0.5 + (Math.random() - 0.5) * 0.12
-        ).velocity;
-        // Recompute cleanly from startPos -> target
-        const dist = startPos.length();
-        const flight = Math.max(0.24, dist * 0.095);
-        const g = OFFICIAL_BALL.gravity;
-        vel.set(
-          (target.x - startPos.x) / flight,
-          (target.y - startPos.y - 0.5 * g * flight * flight) / flight,
-          (target.z - startPos.z) / flight
+        const startPos = this.getServerHandPos(server);
+        const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
+        const target = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.14,
+          netPlaneY,
+          (Math.random() - 0.5) * 0.14
         );
+        const flightTime = 0.34 + Math.random() * 0.05;
+        const vel = computeBallisticVelocity(startPos, target, flightTime);
         this.physics.setBallState(startPos, vel, true);
         server.setAnimState('serve_hit', 0.4);
         this.phase = 'SERVE_IN_FLIGHT';
@@ -585,9 +602,11 @@ export class MatchManager {
     text: string,
     quality: TimingPopup['quality']
   ): void {
+    const winW = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    const winH = typeof window !== 'undefined' ? window.innerHeight : 768;
     const proj = worldPos.clone().add(new THREE.Vector3(0, 0.35, 0)).project(this.camera);
-    const screenX = (proj.x * 0.5 + 0.5) * window.innerWidth;
-    const screenY = (-proj.y * 0.5 + 0.5) * window.innerHeight;
+    const screenX = (proj.x * 0.5 + 0.5) * winW;
+    const screenY = (-proj.y * 0.5 + 0.5) * winH;
     this.popups.push({
       id: ++this.popupCounter,
       text,

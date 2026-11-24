@@ -27,7 +27,7 @@ export const IRF_2026_RULES: RulesConfig = {
   serviceLineRadius: 2.6,
   noHitZoneRadius: 1.0,
   outerBoundaryRadius: 8.5,
-  maxServeBounceHeight: 1.45,
+  maxServeBounceHeight: 1.65,
   firstPossessionRequiresThreeTouches: true,
   outsideInterferenceRedo: true,
 };

@@ -99,7 +99,16 @@ const App: React.FC = () => {
       bots = new BotController(players, physics, matchMgr);
 
       inputMgr = new InputManager(container, {
-        onSwipe: (swipe) => matchMgr.handleHumanSwipe(swipe),
+        onSwipe: (swipe) => {
+          const camFwd = new THREE.Vector3();
+          sceneMgr.camera.getWorldDirection(camFwd);
+          camFwd.y = 0;
+          if (camFwd.lengthSq() > 0.0001) camFwd.normalize();
+          const camRight = new THREE.Vector3()
+            .crossVectors(camFwd, new THREE.Vector3(0, 1, 0))
+            .normalize();
+          matchMgr.handleHumanSwipe(swipe, camRight);
+        },
         onBlockStart: () => {
           human.isBlocking = true;
         },

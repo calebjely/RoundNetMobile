@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { OFFICIAL_NET } from '../config/equipment';
+import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import { IRF_2026_RULES } from '../config/rules';
 import { CharacterController } from '../engine/CharacterController';
 import { MatchManager } from '../engine/MatchManager';
 import { PhysicsWorld } from '../engine/PhysicsWorld';
-import { computeBallisticVelocity } from '../engine/ShotResolver';
+import { computeBallisticVelocity, predictBallIntercept } from '../engine/ShotResolver';
 
 export class BotController {
   private readonly players: CharacterController[];
@@ -12,6 +12,9 @@ export class BotController {
   private readonly match: MatchManager;
   private hitCooldowns = new Map<number, number>();
   private globalTouchCooldown = 0;
+  private reactionDelay = 0;
+  private prevPossessionTeam: string = '';
+  private prevTeamTouches = -1;
 
   constructor(players: CharacterController[], physics: PhysicsWorld, match: MatchManager) {
     this.players = players;
@@ -21,9 +24,25 @@ export class BotController {
 
   public update(dt: number): void {
     this.globalTouchCooldown = Math.max(0, this.globalTouchCooldown - dt);
+    if (
+      this.match.possessionTeam !== this.prevPossessionTeam ||
+      this.match.teamTouches !== this.prevTeamTouches
+    ) {
+      // Realistic human-like 0.15s reaction window when possession flips off the net
+      if (this.match.teamTouches === 0 && this.match.phase === 'RALLY_LIVE') {
+        this.reactionDelay = 0.16;
+      }
+      this.prevPossessionTeam = this.match.possessionTeam;
+      this.prevTeamTouches = this.match.teamTouches;
+    }
+    this.reactionDelay = Math.max(0, this.reactionDelay - dt);
+
     const ballPos = this.physics.getBallPosition();
     const ballVel = this.physics.getBallVelocity();
     const phase = this.match.phase;
+
+    // Predict where the ball will arrive at strike height (y = 1.05 m)
+    const intercept = predictBallIntercept(ballPos, ballVel, 1.05);
 
     for (const bot of this.players) {
       if (bot.isHuman) continue;
@@ -34,33 +53,38 @@ export class BotController {
       const moveIntent = new THREE.Vector2(0, 0);
       let deflection = 0;
 
-      const isLiveBall =
-        phase === 'RALLY_LIVE' ||
-        (phase === 'SERVE_IN_FLIGHT' && bot.team !== this.match.getServingTeam());
+      const isServeRebounded =
+        phase === 'SERVE_IN_FLIGHT' &&
+        this.match.serveReboundedOffNet &&
+        bot.team !== this.match.getServingTeam();
+
+      const isLiveBall = phase === 'RALLY_LIVE' || isServeRebounded;
 
       if (isLiveBall) {
-        const isMyTeamsTurn =
-          phase === 'SERVE_IN_FLIGHT'
-            ? bot.team !== this.match.getServingTeam()
-            : this.match.possessionTeam === bot.team;
+        const isMyTeamsTurn = isServeRebounded
+          ? true
+          : this.match.possessionTeam === bot.team;
 
         const canThisBotTouch =
+          isServeRebounded ||
           this.match.possessionTeam !== bot.team ||
           this.match.lastTouchPlayerIdx !== idx;
 
         if (isMyTeamsTurn && canThisBotTouch) {
-          // Pick closest eligible bot on this team to the ball
-          const teamBots = this.players.filter(
+          // Pick closest eligible player on this team to the PREDICTED intercept point
+          const eligible = this.players.filter(
             (p) =>
               p.team === bot.team &&
-              (this.match.possessionTeam !== p.team || this.match.lastTouchPlayerIdx !== p.config.slotIndex)
+              (isServeRebounded ||
+                this.match.possessionTeam !== p.team ||
+                this.match.lastTouchPlayerIdx !== p.config.slotIndex)
           );
-          let closest = teamBots[0];
+          let closest = eligible[0];
           let bestDist = Infinity;
-          for (const candidate of teamBots) {
+          for (const candidate of eligible) {
             const d = Math.hypot(
-              candidate.position.x - ballPos.x,
-              candidate.position.z - ballPos.z
+              candidate.position.x - intercept.x,
+              candidate.position.z - intercept.z
             );
             if (d < bestDist) {
               bestDist = d;
@@ -69,35 +93,53 @@ export class BotController {
           }
 
           if (closest === bot) {
-            const dx = ballPos.x - bot.position.x;
-            const dz = ballPos.z - bot.position.z;
-            const dist = Math.hypot(dx, dz);
+            if (this.reactionDelay <= 0) {
+              // Chase predicted intercept point after realistic human reaction window
+              const dx = intercept.x - bot.position.x;
+              const dz = intercept.z - bot.position.z;
+              const distToIntercept = Math.hypot(dx, dz);
 
-            if (dist > 0.35) {
-              moveIntent.set(dx / dist, dz / dist);
-              deflection = dist > 1.8 ? 0.88 : 0.5;
+              if (distToIntercept > 0.25) {
+                moveIntent.set(dx / distToIntercept, dz / distToIntercept);
+                deflection = distToIntercept > 1.4 ? 0.78 : 0.48;
+              }
             }
 
-            // Execute bot touch when ball is within reach, cooldown elapsed, and ball isn't rising steeply away
-            const reach = bot.getEffectiveReach() * 0.92;
-            const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= 1.85 && ballVel.y < 2.2;
-            if (cd <= 0 && this.globalTouchCooldown <= 0 && dist <= reach && ballPlayable) {
+            // Execute bot touch when actual ball is within reach and at a natural hitting height
+            const actualDist = Math.hypot(
+              ballPos.x - bot.position.x,
+              ballPos.z - bot.position.z
+            );
+            const reach = bot.getEffectiveReach() * 0.72;
+            const ballPlayable =
+              ballPos.y >= 0.24 &&
+              ballPos.y <= 1.85 &&
+              (ballVel.y < 1.6 || actualDist < 0.7);
+
+            if (
+              cd <= 0 &&
+              this.globalTouchCooldown <= 0 &&
+              actualDist <= reach &&
+              ballPlayable
+            ) {
               this.performBotShot(bot, ballPos);
               this.hitCooldowns.set(idx, 0.55);
-              this.globalTouchCooldown = 0.28;
+              this.globalTouchCooldown = 0.25;
             }
           } else {
-            this.moveToSupportPosition(bot, moveIntent);
-            deflection = 0.48;
+            // Teammate is chasing -> move to ready set/attack spot ~1.6 m from net (outside NHZ)
+            this.moveToAttackReadySpot(bot, moveIntent);
+            deflection = moveIntent.length() > 0.1 ? 0.55 : 0;
           }
         } else {
-          this.moveToSupportPosition(bot, moveIntent);
-          deflection = 0.48;
+          // Defending team -> spread out defensively around 2.6 m radius
+          this.moveToDefensiveSpot(bot, ballPos, moveIntent);
+          deflection = moveIntent.length() > 0.1 ? 0.52 : 0;
         }
       } else {
-        // Hold idle / ready position during serve wait
-        this.moveToSupportPosition(bot, moveIntent, 0.25);
-        deflection = moveIntent.length() > 0.1 ? 0.4 : 0;
+        // Hold quarter starting position before serve rebounds off net
+        this.moveToStartSpot(bot, moveIntent, 0.22);
+        deflection = moveIntent.length() > 0.1 ? 0.45 : 0;
       }
 
       const isPreServe =
@@ -106,16 +148,56 @@ export class BotController {
     }
   }
 
-  private moveToSupportPosition(
+  private moveToStartSpot(
     bot: CharacterController,
     outIntent: THREE.Vector2,
-    deadzone = 0.35
+    deadzone = 0.25
   ): void {
     const target = new THREE.Vector3(...bot.config.startPos);
     const dx = target.x - bot.position.x;
     const dz = target.z - bot.position.z;
     const dist = Math.hypot(dx, dz);
     if (dist > deadzone) {
+      outIntent.set(dx / dist, dz / dist);
+    }
+  }
+
+  private moveToAttackReadySpot(
+    bot: CharacterController,
+    outIntent: THREE.Vector2
+  ): void {
+    // Move to ~1.65 m from net in the bot's quarter so a teammate set drops cleanly for a spike
+    const angle = bot.config.quarterCenterAngle;
+    const tx = Math.sin(angle) * 1.65;
+    const tz = Math.cos(angle) * 1.65;
+    const dx = tx - bot.position.x;
+    const dz = tz - bot.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 0.3) {
+      outIntent.set(dx / dist, dz / dist);
+    }
+  }
+
+  private moveToDefensiveSpot(
+    bot: CharacterController,
+    ballPos: THREE.Vector3,
+    outIntent: THREE.Vector2
+  ): void {
+    // Position ~2.7 m from net biased opposite the ball so defenders cover spikes
+    const ballAngle = Math.atan2(ballPos.x, ballPos.z);
+    const baseAngle = bot.config.quarterCenterAngle;
+    // Slight shift away from ball without collapsing onto teammate
+    let diff = ballAngle - baseAngle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    const defAngle = baseAngle - Math.sign(diff) * 0.18;
+
+    const tx = Math.sin(defAngle) * 2.75;
+    const tz = Math.cos(defAngle) * 2.75;
+    const dx = tx - bot.position.x;
+    const dz = tz - bot.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 0.35) {
       outIntent.set(dx / dist, dz / dist);
     }
   }
@@ -133,33 +215,45 @@ export class BotController {
     const mustAttack = nextTouches >= 3;
     const canAttackEarly =
       !this.match.isFirstPossessionAfterServe &&
-      nextTouches >= 2 &&
-      Math.hypot(bot.position.x, bot.position.z) < 1.9 &&
-      Math.random() < 0.35;
+      nextTouches === 2 &&
+      Math.hypot(bot.position.x, bot.position.z) < 1.85 &&
+      Math.random() < 0.25;
+
+    const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
 
     if (mustAttack || canAttackEarly) {
-      // Respect 1.00 m NHZ: if bot is inside NHZ, step back or lob safely
+      // Respect 1.00 m NHZ
       const distNet = Math.hypot(bot.position.x, bot.position.z);
-      if (distNet < IRF_2026_RULES.noHitZoneRadius + 0.05) {
-        const pushOut = (IRF_2026_RULES.noHitZoneRadius + 0.15) / Math.max(0.01, distNet);
+      if (distNet < IRF_2026_RULES.noHitZoneRadius + 0.08) {
+        const pushOut = (IRF_2026_RULES.noHitZoneRadius + 0.16) / Math.max(0.01, distNet);
         bot.position.x *= pushOut;
         bot.position.z *= pushOut;
       }
-      const target = new THREE.Vector3(
-        (Math.random() - 0.5) * 0.26,
-        OFFICIAL_NET.netHeight,
-        (Math.random() - 0.5) * 0.26
-      );
-      const flightTime = THREE.MathUtils.clamp(0.18 + distNet * 0.07, 0.17, 0.38);
+
+      // Mix hard spikes (75%) and high rainbow drop shots (25%)
+      const isDropShot = Math.random() < 0.25;
+      const cutX = (Math.random() - 0.5) * 0.32;
+      const cutZ = (Math.random() - 0.5) * 0.32;
+      const target = new THREE.Vector3(cutX, netPlaneY - 0.01, cutZ);
+
+      const flightTime = isDropShot
+        ? THREE.MathUtils.clamp(0.88 + distNet * 0.1, 0.88, 1.25)
+        : THREE.MathUtils.clamp(0.14 + distNet * 0.04, 0.14, 0.28);
       const vel = computeBallisticVelocity(ballPos, target, flightTime);
       this.match.handleBotTouch(bot, vel, true);
     } else {
-      // Set toward teammate (leaning slightly toward center net for a clean attack)
+      // High readable set to teammate (arrives at y = 1.22 m after ~0.95 s -> peaks at ~2.35 m!)
       const setTarget = teammate
-        ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.35)
+        ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.3)
         : new THREE.Vector3(0, 0, 0);
-      setTarget.y = 2.05;
-      const vel = computeBallisticVelocity(ballPos, setTarget, 1.08);
+      const r = Math.hypot(setTarget.x, setTarget.z);
+      if (r < 1.35 && r > 0.01) {
+        setTarget.x = (setTarget.x / r) * 1.45;
+        setTarget.z = (setTarget.z / r) * 1.45;
+      }
+      setTarget.y = 1.22;
+      const flightTime = nextTouches === 1 ? 0.94 : 0.98;
+      const vel = computeBallisticVelocity(ballPos, setTarget, flightTime);
       this.match.handleBotTouch(bot, vel, false);
     }
   }
