@@ -4,7 +4,11 @@ import { IRF_2026_RULES } from '../config/rules';
 import { CharacterController } from '../engine/CharacterController';
 import { MatchManager } from '../engine/MatchManager';
 import { PhysicsWorld } from '../engine/PhysicsWorld';
-import { computeBallisticVelocity, predictBallIntercept } from '../engine/ShotResolver';
+import {
+  computeBallisticVelocity,
+  MAX_HITTING_HEIGHT,
+  predictBallIntercept,
+} from '../engine/ShotResolver';
 
 export class BotController {
   private readonly players: CharacterController[];
@@ -105,16 +109,13 @@ export class BotController {
               }
             }
 
-            // Execute bot touch when actual ball is within reach and at a natural hitting height
+            // Can hit on the way up OR down unless ball is above hitting height!
             const actualDist = Math.hypot(
               ballPos.x - bot.position.x,
               ballPos.z - bot.position.z
             );
             const reach = bot.getEffectiveReach() * 0.72;
-            const ballPlayable =
-              ballPos.y >= 0.24 &&
-              ballPos.y <= 1.85 &&
-              (ballVel.y < 1.6 || actualDist < 0.7);
+            const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= MAX_HITTING_HEIGHT;
 
             if (
               cd <= 0 &&
@@ -132,9 +133,20 @@ export class BotController {
             deflection = moveIntent.length() > 0.1 ? 0.55 : 0;
           }
         } else {
-          // Defending team -> spread out defensively around 2.6 m radius
+          // Defending team -> spread out defensively AND try to yield path to possessing players (avoid hinder)
           this.moveToDefensiveSpot(bot, ballPos, moveIntent);
-          deflection = moveIntent.length() > 0.1 ? 0.52 : 0;
+          for (const other of this.players) {
+            if (other.team === bot.team) continue;
+            const odx = bot.position.x - other.position.x;
+            const odz = bot.position.z - other.position.z;
+            const od = Math.hypot(odx, odz);
+            if (od < 1.35 && od > 0.01) {
+              moveIntent.x += (odx / od) * 1.4;
+              moveIntent.y += (odz / od) * 1.4;
+            }
+          }
+          if (moveIntent.lengthSq() > 0.01) moveIntent.normalize();
+          deflection = moveIntent.length() > 0.1 ? 0.54 : 0;
         }
       } else {
         // Hold quarter starting position before serve rebounds off net

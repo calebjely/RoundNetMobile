@@ -81,19 +81,21 @@ export function predictBallIntercept(
   };
 }
 
+export const MAX_HITTING_HEIGHT = 1.98;
+
 export class ShotResolver {
   public static evaluateTiming(
     player: CharacterController,
     ballPos: THREE.Vector3,
-    ballVel: THREE.Vector3
+    _ballVel: THREE.Vector3
   ): TimingQuality {
     const dist = Math.hypot(ballPos.x - player.position.x, ballPos.z - player.position.z);
-    if (ballPos.y > 1.75 && ballVel.y > 0.6) return 'Early';
-    if (ballPos.y < 0.34 && ballVel.y < -0.5) return 'Late';
-    if (dist <= 1.25 && ballPos.y >= 0.42 && ballPos.y <= 1.75) {
+    if (ballPos.y > 1.82) return 'Early';
+    if (ballPos.y < 0.4) return 'Late';
+    if (dist <= 1.35 && ballPos.y >= 0.4 && ballPos.y <= 1.82) {
       return 'Perfect';
     }
-    return ballPos.y > 1.35 ? 'Early' : 'Late';
+    return ballPos.y > 1.45 ? 'Early' : 'Late';
   }
 
   public static resolveRallyShot(
@@ -115,7 +117,8 @@ export class ShotResolver {
       horizDist > 0.55;
 
     const maxReach = player.getEffectiveReach() + (shouldAutoDive ? 0.55 : 0);
-    if (horizDist > maxReach || ballPos.y > 2.55) {
+    // Can hit on the way up OR down unless ball is above hitting height!
+    if (horizDist > maxReach || ballPos.y > MAX_HITTING_HEIGHT) {
       return null;
     }
 

@@ -22,6 +22,7 @@ export interface OffscreenLandingHint {
   screenX: number;
   screenY: number;
   angleDeg: number;
+  teamColor: string;
 }
 
 export class SceneManager {
@@ -66,11 +67,15 @@ export class SceneManager {
   private netHitDotMesh!: THREE.Mesh;
   private netArrowGroup!: THREE.Group;
   private landingRingMesh!: THREE.Mesh;
+  private landingRingMat!: THREE.MeshBasicMaterial;
+  private landingInnerMesh!: THREE.Mesh;
+  private landingInnerMat!: THREE.MeshBasicMaterial;
   private offscreenLandingHint: OffscreenLandingHint = {
     visible: false,
     screenX: 0,
     screenY: 0,
     angleDeg: 0,
+    teamColor: '#facc15',
   };
 
   private proceduralEnvGroup: THREE.Group | null = null;
@@ -657,20 +662,37 @@ export class SceneManager {
   }
 
   private createLandingCircle(): void {
-    const geo = new THREE.RingGeometry(0.16, 0.26, 32);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xfacc15,
+    // Outer ring bigger than player foot+stamina ring (0.54 m -> outer landing circle 0.64..0.74 m)
+    const outerGeo = new THREE.RingGeometry(0.64, 0.74, 40);
+    this.landingRingMat = new THREE.MeshBasicMaterial({
+      color: 0x3b82f6,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.92,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const ring = new THREE.Mesh(geo, mat);
+    const ring = new THREE.Mesh(outerGeo, this.landingRingMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.018;
     ring.visible = false;
     this.landingRingMesh = ring;
     this.scene.add(ring);
+
+    // Dynamic inner height-indicator circle:
+    // Smaller when ball is high; grows larger as ball drops; FULL circle (0.64 m) at hitting height!
+    const innerGeo = new THREE.CircleGeometry(0.64, 36);
+    this.landingInnerMat = new THREE.MeshBasicMaterial({
+      color: 0x3b82f6,
+      transparent: true,
+      opacity: 0.32,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.landingInnerMesh = new THREE.Mesh(innerGeo, this.landingInnerMat);
+    this.landingInnerMesh.rotation.x = -Math.PI / 2;
+    this.landingInnerMesh.position.y = 0.017;
+    this.landingInnerMesh.visible = false;
+    this.scene.add(this.landingInnerMesh);
   }
 
   public getOffscreenLandingHint(): OffscreenLandingHint {
@@ -679,7 +701,7 @@ export class SceneManager {
 
   /**
    * Simulates the ball's forward trajectory using exact gravity, drag, and net trampoline bounce:
-   * - Always shows the ground landing circle whenever the ball is airborne in play.
+   * - Always shows the team-colored ground landing circle (bigger than player ring) + dynamic height inner circle.
    * - Only when `isAimedAfterHit` is true AND the ball is projected to hit the net/rim:
    *   shows a dot on the net impact spot and an exit arrow outside the rim.
    */
@@ -687,15 +709,21 @@ export class SceneManager {
     ballPos: THREE.Vector3,
     ballVel: THREE.Vector3,
     isLive: boolean,
-    isAimedAfterHit: boolean
+    isAimedAfterHit: boolean,
+    activeTeamHex: number,
+    activeTeamCss: string
   ): void {
     if (!isLive || ballPos.y <= OFFICIAL_BALL.radius + 0.01) {
       this.netHitDotMesh.visible = false;
       this.netArrowGroup.visible = false;
       this.landingRingMesh.visible = false;
+      this.landingInnerMesh.visible = false;
       this.offscreenLandingHint.visible = false;
       return;
     }
+
+    this.landingRingMat.color.setHex(activeTeamHex);
+    this.landingInnerMat.color.setHex(activeTeamHex);
 
     const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
     const netDiscRadius = OFFICIAL_NET.rimRadius + OFFICIAL_NET.rimTubeRadius * 0.5;
@@ -790,6 +818,26 @@ export class SceneManager {
       this.landingRingMesh.position.set(x, 0.018, z);
       this.landingRingMesh.visible = true;
 
+      // Dynamic inner circle: small when high (> 1.95 m), grows larger closer to ground, FULL (1.0) at hitting height!
+      const hitHeight = 1.95;
+      const maxHeight = 4.2;
+      let innerScale: number;
+      if (ballPos.y <= hitHeight) {
+        innerScale = 1.0;
+        this.landingInnerMat.opacity = 0.46;
+      } else {
+        const heightNorm = THREE.MathUtils.clamp(
+          (ballPos.y - hitHeight) / (maxHeight - hitHeight),
+          0,
+          1
+        );
+        innerScale = THREE.MathUtils.lerp(0.86, 0.16, heightNorm);
+        this.landingInnerMat.opacity = 0.24;
+      }
+      this.landingInnerMesh.position.set(x, 0.017, z);
+      this.landingInnerMesh.scale.setScalar(innerScale);
+      this.landingInnerMesh.visible = true;
+
       const proj = this.landingRingMesh.position.clone().project(this.camera);
       const isOffscreen =
         proj.z > 1 || Math.abs(proj.x) > 0.9 || Math.abs(proj.y) > 0.9;
@@ -805,12 +853,19 @@ export class SceneManager {
         const sx = window.innerWidth * 0.5 + nx * halfW;
         const sy = window.innerHeight * 0.5 - ny * halfH;
         const angleDeg = (Math.atan2(-ny, nx) * 180) / Math.PI;
-        this.offscreenLandingHint = { visible: true, screenX: sx, screenY: sy, angleDeg };
+        this.offscreenLandingHint = {
+          visible: true,
+          screenX: sx,
+          screenY: sy,
+          angleDeg,
+          teamColor: activeTeamCss,
+        };
       } else {
         this.offscreenLandingHint.visible = false;
       }
     } else {
       this.landingRingMesh.visible = false;
+      this.landingInnerMesh.visible = false;
       this.offscreenLandingHint.visible = false;
     }
   }

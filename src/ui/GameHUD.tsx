@@ -78,13 +78,19 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </span>
           </div>
           <div className="meta-row">
-            <span className="touch-counter">
-              {hud.phase === 'RALLY_LIVE'
-                ? `Touches: ${hud.teamTouches}/3${hud.isFirstPossessionAfterServe ? ' (3 req)' : ''}`
-                : hud.isHumanServing
-                  ? 'Swipe Up on Right to Toss'
-                  : 'Ready'}
-            </span>
+            {hud.phase === 'RALLY_LIVE' || hud.phase === 'SERVE_IN_FLIGHT' ? (
+              <span
+                className={`touch-counter team-ball-${hud.possessionTeam.toLowerCase()}`}
+              >
+                {hud.possessionTeam === 'A' ? 'BLUE BALL' : 'ORANGE BALL'} · HIT{' '}
+                {Math.min(3, hud.teamTouches + 1)}/3
+                {hud.isFirstPossessionAfterServe ? ' (3 req)' : ''}
+              </span>
+            ) : (
+              <span className="touch-counter">
+                {hud.isHumanServing ? 'Swipe Up on Right to Toss' : 'Ready'}
+              </span>
+            )}
           </div>
         </div>
 
@@ -143,6 +149,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           style={{
             left: offscreenLanding.screenX,
             top: offscreenLanding.screenY,
+            borderColor: offscreenLanding.teamColor,
+            color: offscreenLanding.teamColor,
             transform: `translate(-50%, -50%) rotate(${offscreenLanding.angleDeg}deg)`,
           }}
         >

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TeamId } from '../config/characters';
+import { MOVEMENT_TUNING, TeamId } from '../config/characters';
 import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import { IRF_2026_RULES } from '../config/rules';
 import { CharacterController } from './CharacterController';
@@ -506,6 +506,9 @@ export class MatchManager {
     const now = performance.now();
     this.popups = this.popups.filter((p) => now - p.createdAt < 900);
 
+    // Physical character-to-character collisions + IRF Interference (Hinder) call
+    this.resolvePlayerCollisions(ballPos);
+
     // Block collider check for human & bots at net
     if (this.phase === 'RALLY_LIVE') {
       for (const p of this.players) {
@@ -597,6 +600,71 @@ export class MatchManager {
     }
   }
 
+  private resolvePlayerCollisions(ballPos: THREE.Vector3): void {
+    const minSep = MOVEMENT_TUNING.playerRadius * 2.05; // ~0.70 m physical body separation
+    const isLivePlay =
+      this.phase === 'RALLY_LIVE' ||
+      (this.phase === 'SERVE_IN_FLIGHT' && this.serveReboundedOffNet);
+    const activeTeam: TeamId =
+      this.phase === 'SERVE_IN_FLIGHT'
+        ? this.getServingTeam() === 'A'
+          ? 'B'
+          : 'A'
+        : this.possessionTeam;
+
+    for (let i = 0; i < this.players.length; i++) {
+      for (let j = i + 1; j < this.players.length; j++) {
+        const a = this.players[i];
+        const b = this.players[j];
+        const dx = b.position.x - a.position.x;
+        const dz = b.position.z - a.position.z;
+        const dist = Math.hypot(dx, dz);
+
+        if (dist < minSep) {
+          const nx = dist > 0.001 ? dx / dist : 1;
+          const nz = dist > 0.001 ? dz / dist : 0;
+          const overlap = (minSep - dist) * 0.5;
+
+          a.position.x -= nx * overlap;
+          a.position.z -= nz * overlap;
+          b.position.x += nx * overlap;
+          b.position.z += nz * overlap;
+          a.root.position.copy(a.position);
+          b.root.position.copy(b.position);
+
+          // IRF Hinder / Interference Call:
+          // Opposing defender physically obstructs a possessing player actively playing/chasing the live ball
+          if (isLivePlay && a.team !== b.team) {
+            const possessor = a.team === activeTeam ? a : b;
+            const defender = a.team === activeTeam ? b : a;
+            const distToBall = Math.hypot(
+              ballPos.x - possessor.position.x,
+              ballPos.z - possessor.position.z
+            );
+            const possessorSpeed = Math.hypot(possessor.velocity.x, possessor.velocity.z);
+            if (!defender.isBlocking && (distToBall < 3.4 || possessorSpeed > 1.8)) {
+              const mid = a.position.clone().lerp(b.position, 0.5);
+              this.triggerPlayerInterference(mid);
+              return;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private triggerPlayerInterference(worldPos: THREE.Vector3): void {
+    if (this.phase === 'REDO_BANNER' || this.phase === 'POINT_OVER' || this.phase === 'MATCH_OVER') {
+      return;
+    }
+    this.phase = 'REDO_BANNER';
+    this.phaseTimer = 1.8;
+    this.bannerText = 'INTERFERENCE — REDO';
+    this.bannerTone = 'redo';
+    this.serveAttempt = 1;
+    this.spawnPopup(worldPos.clone().add(new THREE.Vector3(0, 1.3, 0)), 'INTERFERENCE!', 'Redo');
+  }
+
   private spawnPopup(
     worldPos: THREE.Vector3,
     text: string,
@@ -620,6 +688,12 @@ export class MatchManager {
   public getHUDState(): MatchHUDState {
     const server = this.getCurrentServer();
     const human = this.players.find((p) => p.isHuman);
+    const effectivePossession: TeamId =
+      this.phase === 'SERVE_IN_FLIGHT' && this.serveReboundedOffNet
+        ? server.team === 'A'
+          ? 'B'
+          : 'A'
+        : this.possessionTeam;
     return {
       scoreA: this.scoreA,
       scoreB: this.scoreB,
@@ -630,7 +704,7 @@ export class MatchManager {
       isHumanServing: server.isHuman,
       serveAttempt: this.serveAttempt,
       servePointsRemaining: this.isVeryFirstServeOfMatch ? 1 : this.servePointsRemaining,
-      possessionTeam: this.possessionTeam,
+      possessionTeam: effectivePossession,
       teamTouches: this.teamTouches,
       isFirstPossessionAfterServe: this.isFirstPossessionAfterServe,
       phase: this.phase,

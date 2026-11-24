@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as THREE from 'three';
 import { BotController } from './ai/BotController';
-import { PHASE1_LINEUP } from './config/characters';
+import { PHASE1_LINEUP, TEAM_COLORS, TeamId } from './config/characters';
 import {
   CourtOffsetConfig,
   DEFAULT_MAP_ID,
@@ -41,6 +41,7 @@ const App: React.FC = () => {
     screenX: 0,
     screenY: 0,
     angleDeg: 0,
+    teamColor: '#3b82f6',
   });
   const [returnToNetActive, setReturnToNetActive] = useState(false);
   const [calibrateMode, setCalibrateMode] = useState(
@@ -283,7 +284,25 @@ const App: React.FC = () => {
         const isAimedAfterHit =
           (matchMgr.phase === 'SERVE_IN_FLIGHT' && !matchMgr.serveReboundedOffNet) ||
           (matchMgr.phase === 'RALLY_LIVE' && matchMgr.teamTouches > 0);
-        sceneMgr.updateBallIndicators(ballPos, ballVel, isBallLive, isAimedAfterHit);
+        const activeBallTeam: TeamId =
+          matchMgr.phase === 'SERVE_IN_FLIGHT'
+            ? matchMgr.serveReboundedOffNet
+              ? matchMgr.getServingTeam() === 'A'
+                ? 'B'
+                : 'A'
+              : matchMgr.getServingTeam()
+            : matchMgr.phase === 'SERVE_METER_ACTIVE'
+              ? matchMgr.getServingTeam()
+              : matchMgr.possessionTeam;
+        const teamMeta = TEAM_COLORS[activeBallTeam];
+        sceneMgr.updateBallIndicators(
+          ballPos,
+          ballVel,
+          isBallLive,
+          isAimedAfterHit,
+          teamMeta.hex,
+          teamMeta.primary
+        );
 
         const tracked = players.map((p) => p.position);
         tracked.push(ballPos);
