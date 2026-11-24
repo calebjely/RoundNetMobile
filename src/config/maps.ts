@@ -23,13 +23,13 @@ export const MAPS: Record<string, MapConfig> = {
     splatUrl: '/assets/maps/the-eyebrow/scene.spz',
     collisionUrl: '/assets/maps/the-eyebrow/scene.collision.glb',
     courtOffset: {
-      position: [0, 0, 0],
-      rotationY: 0,
-      scale: 1,
+      position: [4.204, 0.38, -3.196],
+      rotationY: 0.478,
+      scale: 0.793,
     },
-    // 3/4 elevated press-box angle centered on (0, 0, 0)
-    cameraPosition: [0, 8.2, 10.6],
-    cameraTarget: [0, 0.55, 0],
+    // Calibrated 3/4 elevated press-box angle centered on (0, 0, 0)
+    cameraPosition: [12.313, 8.064, -7.367],
+    cameraTarget: [0.138, 0.566, -0.112],
     fov: 46,
     maxZoomOutFactor: 1.45,
   },
