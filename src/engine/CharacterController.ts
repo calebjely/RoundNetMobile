@@ -88,6 +88,9 @@ export class CharacterController {
     head: THREE.Object3D;
   } | null = null;
   private animClock = 0;
+  private staminaRingMesh: THREE.Mesh | null = null;
+  private staminaRingMat: THREE.MeshBasicMaterial | null = null;
+  private readonly staminaSegments = 36;
 
   constructor(config: MatchParticipantConfig, scene: THREE.Scene) {
     this.config = config;
@@ -206,7 +209,7 @@ export class CharacterController {
   private createFootRing(): void {
     const color = this.isHuman ? USER_HIGHLIGHT_HEX : TEAM_COLORS[this.team].ringHex;
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.36, 0.46, 32),
+      new THREE.RingGeometry(0.36, 0.44, 32),
       new THREE.MeshBasicMaterial({
         color,
         transparent: true,
@@ -218,6 +221,37 @@ export class CharacterController {
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.015;
     this.root.add(ring);
+
+    if (this.isHuman) {
+      // Background track for stamina ring
+      const track = new THREE.Mesh(
+        new THREE.RingGeometry(0.46, 0.54, this.staminaSegments),
+        new THREE.MeshBasicMaterial({
+          color: 0x0f172a,
+          transparent: true,
+          opacity: 0.55,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      );
+      track.rotation.x = -Math.PI / 2;
+      track.position.y = 0.016;
+      this.root.add(track);
+
+      // Filling stamina arc ring (zero-GC via setDrawRange)
+      const staminaGeo = new THREE.RingGeometry(0.46, 0.54, this.staminaSegments);
+      this.staminaRingMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      this.staminaRingMesh = new THREE.Mesh(staminaGeo, this.staminaRingMat);
+      this.staminaRingMesh.rotation.x = -Math.PI / 2;
+      this.staminaRingMesh.position.y = 0.018;
+      this.root.add(this.staminaRingMesh);
+    }
   }
 
   private createNameplate(): void {
@@ -465,6 +499,13 @@ export class CharacterController {
 
     this.root.position.copy(this.position);
     this.root.rotation.y = this.facingAngle;
+
+    if (this.staminaRingMesh && this.staminaRingMat) {
+      const pct = THREE.MathUtils.clamp(this.stamina / maxStam, 0, 1);
+      const activeSegs = Math.round(pct * this.staminaSegments);
+      this.staminaRingMesh.geometry.setDrawRange(0, activeSegs * 6);
+      this.staminaRingMat.color.setHex(this.isExhausted ? 0xef4444 : 0x38bdf8);
+    }
 
     if (this.mixer) {
       this.mixer.update(dt);

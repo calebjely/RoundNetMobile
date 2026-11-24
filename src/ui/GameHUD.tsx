@@ -44,11 +44,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const staminaPct = Math.max(
-    0,
-    Math.min(100, (hud.humanStamina / Math.max(1, hud.humanMaxStamina)) * 100)
-  );
-
   return (
     <div className="hud-root">
       {/* Non-blocking Portrait Orientation Hint */}
@@ -86,13 +81,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       </div>
 
-      {/* Top Right Menu Button */}
+      {/* Top Right Circular Gaming Menu Button */}
       <button
         data-ui-interactive="true"
-        className="menu-btn"
+        className="menu-btn game-circle-btn"
         onClick={() => setMenuOpen(true)}
+        aria-label="Menu"
       >
-        ☰ Menu
+        <span className="circle-btn-icon">☰</span>
       </button>
 
       {/* Center Event Banner (Point, Fault, REDO) */}
@@ -127,29 +123,18 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       ))}
 
-      {/* Bottom-Left Controls: Return to Net + Stamina + Virtual Joystick */}
+      {/* Bottom-Left Circular Gaming Button: Return to Net */}
       <div className="bottom-left-cluster">
         <button
           data-ui-interactive="true"
-          className={`return-net-btn ${returnToNetActive ? 'active' : ''}`}
+          className={`return-net-btn game-circle-btn ${returnToNetActive ? 'active' : ''}`}
           onPointerDown={() => onReturnToNetPress(true)}
           onPointerUp={() => onReturnToNetPress(false)}
           onPointerCancel={() => onReturnToNetPress(false)}
         >
-          Return to Net
+          <span className="circle-btn-icon">◎</span>
+          <span className="circle-btn-label">NET</span>
         </button>
-
-        <div className="stamina-wrap">
-          <div className="stamina-label">
-            STAMINA {hud.humanExhausted ? '(RECOVERING)' : ''}
-          </div>
-          <div className="stamina-track">
-            <div
-              className={`stamina-fill ${hud.humanExhausted ? 'exhausted' : ''}`}
-              style={{ width: `${staminaPct}%` }}
-            />
-          </div>
-        </div>
       </div>
 
       {/* Progressive Dual-Ring Virtual Joystick Visual */}
