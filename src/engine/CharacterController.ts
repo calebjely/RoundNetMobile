@@ -335,8 +335,14 @@ export class CharacterController {
    * Updates movement, stamina, dive/get_up timers, and animation state machine.
    * @param moveInput normalized 2D intent vector (x, z)
    * @param deflection 0..1 joystick deflection (0..0.55 walk, 0.55..1.0 sprint)
+   * @param restrictToQuarterSlice when true (pre-serve), clamps player inside their 90° quarter slice behind the 2.60 m service line
    */
-  public update(dt: number, moveInput: THREE.Vector2, deflection: number): void {
+  public update(
+    dt: number,
+    moveInput: THREE.Vector2,
+    deflection: number,
+    restrictToQuarterSlice = false
+  ): void {
     this.animClock += dt;
     this.nhzFollowThroughTimer = Math.max(0, this.nhzFollowThroughTimer - dt);
     if (this.actionLockTimer > 0) {
@@ -425,18 +431,36 @@ export class CharacterController {
     this.position.addScaledVector(this.velocity, dt);
 
     // Keep player outside physical net rim cylinder (0.48 m) and inside outer playable fence (9.6 m)
-    const distFromCenter = Math.hypot(this.position.x, this.position.z);
-    const minNetClearance = 0.56;
-    if (distFromCenter < minNetClearance && distFromCenter > 0.001) {
-      const push = minNetClearance / distFromCenter;
+    let distFromCenter = Math.hypot(this.position.x, this.position.z);
+    const minRadius = restrictToQuarterSlice ? IRF_2026_RULES.serviceLineRadius + 0.05 : 0.56;
+    if (distFromCenter < minRadius && distFromCenter > 0.001) {
+      const push = minRadius / distFromCenter;
       this.position.x *= push;
       this.position.z *= push;
+      distFromCenter = minRadius;
     }
-    const maxBounds = 9.5;
+    const maxBounds = restrictToQuarterSlice ? IRF_2026_RULES.outerBoundaryRadius : 9.5;
     if (distFromCenter > maxBounds) {
       const clamp = maxBounds / distFromCenter;
       this.position.x *= clamp;
       this.position.z *= clamp;
+      distFromCenter = maxBounds;
+    }
+
+    // Clamp to 90° quarter ("pizza slice") before the serve is struck
+    if (restrictToQuarterSlice && distFromCenter > 0.001) {
+      const centerAngle = this.config.quarterCenterAngle;
+      const curAngle = Math.atan2(this.position.x, this.position.z);
+      let delta = curAngle - centerAngle;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+
+      const halfSlice = Math.PI / 4 - 0.04; // 45° half-width with slight player radius margin
+      if (Math.abs(delta) > halfSlice) {
+        const clampedAngle = centerAngle + Math.sign(delta) * halfSlice;
+        this.position.x = Math.sin(clampedAngle) * distFromCenter;
+        this.position.z = Math.cos(clampedAngle) * distFromCenter;
+      }
     }
 
     this.root.position.copy(this.position);

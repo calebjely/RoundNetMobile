@@ -95,7 +95,9 @@ export class BotController {
         deflection = moveIntent.length() > 0.1 ? 0.4 : 0;
       }
 
-      bot.update(dt, moveIntent, deflection);
+      const isPreServe =
+        phase === 'SERVE_WAIT_TOSS' || phase === 'SERVE_METER_ACTIVE';
+      bot.update(dt, moveIntent, deflection, isPreServe);
     }
   }
 

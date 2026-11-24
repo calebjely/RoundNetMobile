@@ -162,6 +162,26 @@ export class SceneManager {
     this.scene.add(createRing(IRF_2026_RULES.serviceLineRadius, 0.035, 0xffffff, 0.42));
     // 8.50 m Outer Boundary
     this.scene.add(createRing(IRF_2026_RULES.outerBoundaryRadius, 0.05, 0xffffff, 0.3));
+
+    // Quarter ("pizza slice") dividing lines at 45°, 135°, 225°, 315°
+    const lineLen = IRF_2026_RULES.outerBoundaryRadius - IRF_2026_RULES.noHitZoneRadius;
+    const midR = (IRF_2026_RULES.outerBoundaryRadius + IRF_2026_RULES.noHitZoneRadius) * 0.5;
+    const lineGeo = new THREE.PlaneGeometry(0.03, lineLen);
+    const lineMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.24,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    for (let i = 0; i < 4; i++) {
+      const angle = Math.PI / 4 + (i * Math.PI) / 2;
+      const line = new THREE.Mesh(lineGeo, lineMat);
+      line.rotation.x = -Math.PI / 2;
+      line.rotation.z = -angle;
+      line.position.set(Math.sin(angle) * midR, 0.01, Math.cos(angle) * midR);
+      this.scene.add(line);
+    }
   }
 
   private createNetTexture(): THREE.CanvasTexture {

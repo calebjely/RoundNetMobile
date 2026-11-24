@@ -121,35 +121,41 @@ export interface MatchParticipantConfig {
   team: TeamId;
   isHuman: boolean;
   startPos: [number, number, number];
+  /** Center angle (radians, atan2(x, z)) of the player's 90° pre-serve quarter slice */
+  quarterCenterAngle: number;
 }
 
 export const PHASE1_LINEUP: MatchParticipantConfig[] = [
   {
     slotIndex: 0,
-    profile: ROSTER[1], // Caleb (User)
+    profile: ROSTER[1], // Caleb (User) - South (+Z) quarter
     team: 'A',
     isHuman: true,
     startPos: [0, 0, 2.85],
+    quarterCenterAngle: 0,
   },
   {
     slotIndex: 1,
-    profile: ROSTER[0], // Jacob (Teammate)
+    profile: ROSTER[0], // Jacob (Teammate) - West (-X) quarter
     team: 'A',
     isHuman: false,
-    startPos: [-2.4, 0, 1.4],
+    startPos: [-2.85, 0, 0],
+    quarterCenterAngle: -Math.PI / 2,
   },
   {
     slotIndex: 2,
-    profile: ROSTER[2], // Rob (Opponent 1)
+    profile: ROSTER[2], // Rob (Opponent 1) - North (-Z) quarter
     team: 'B',
     isHuman: false,
     startPos: [0, 0, -2.85],
+    quarterCenterAngle: Math.PI,
   },
   {
     slotIndex: 3,
-    profile: ROSTER[3], // Zach (Opponent 2)
+    profile: ROSTER[3], // Zach (Opponent 2) - East (+X) quarter
     team: 'B',
     isHuman: false,
-    startPos: [2.4, 0, -1.4],
+    startPos: [2.85, 0, 0],
+    quarterCenterAngle: Math.PI / 2,
   },
 ];

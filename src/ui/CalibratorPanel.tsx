@@ -109,6 +109,19 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
               onChange={(e) => updateHeight(parseFloat(e.target.value))}
             />
           </label>
+          <label className="cal-row">
+            <span>Rotation ({Math.round((offset.rotationY * 180) / Math.PI)}°)</span>
+            <input
+              type="range"
+              min={-Math.PI}
+              max={Math.PI}
+              step={0.01}
+              value={offset.rotationY}
+              onChange={(e) =>
+                onChangeOffset({ ...offset, rotationY: parseFloat(e.target.value) })
+              }
+            />
+          </label>
           <div className="cal-readout">
             X: {offset.position[0].toFixed(2)} m · Z: {offset.position[2].toFixed(2)} m
           </div>

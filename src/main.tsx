@@ -156,7 +156,9 @@ const App: React.FC = () => {
           }
         }
 
-        human.update(dt, dir, deflection);
+        const isPreServe =
+          matchMgr.phase === 'SERVE_WAIT_TOSS' || matchMgr.phase === 'SERVE_METER_ACTIVE';
+        human.update(dt, dir, deflection, isPreServe);
         bots.update(dt);
         physics.step(dt);
         matchMgr.update(dt);
