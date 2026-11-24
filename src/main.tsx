@@ -8,7 +8,7 @@ import { CharacterController } from './engine/CharacterController';
 import { InputManager, JoystickVisualState } from './engine/InputManager';
 import { MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
 import { PhysicsWorld } from './engine/PhysicsWorld';
-import { SceneManager } from './engine/SceneManager';
+import { OffscreenLandingHint, SceneManager } from './engine/SceneManager';
 import { CalibratorTab } from './ui/CalibratorPanel';
 import { GameHUD } from './ui/GameHUD';
 import './styles.css';
@@ -28,13 +28,18 @@ const App: React.FC = () => {
     isSprint: false,
   });
   const [popups, setPopups] = useState<TimingPopup[]>([]);
+  const [offscreenLanding, setOffscreenLanding] = useState<OffscreenLandingHint>({
+    visible: false,
+    screenX: 0,
+    screenY: 0,
+    angleDeg: 0,
+  });
   const [returnToNetActive, setReturnToNetActive] = useState(false);
   const [calibrateMode, setCalibrateMode] = useState(
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
   const [calibrateTab, setCalibrateTab] = useState<CalibratorTab>('camera');
   const [courtOffset, setCourtOffset] = useState<CourtOffsetConfig>(mapConfig.courtOffset);
-  const [fov, setFov] = useState<number>(mapConfig.fov);
 
   const engineRef = useRef<{
     sceneMgr: SceneManager;
@@ -187,6 +192,7 @@ const App: React.FC = () => {
           setHud(matchMgr.getHUDState());
           setJoystick({ ...inputMgr.joystickState });
           setPopups([...matchMgr.popups]);
+          setOffscreenLanding(sceneMgr.getOffscreenLandingHint());
         }
 
         rafId = requestAnimationFrame(tick);
@@ -237,6 +243,7 @@ const App: React.FC = () => {
           hud={hud}
           joystick={joystick}
           popups={popups}
+          offscreenLanding={offscreenLanding}
           returnToNetActive={returnToNetActive}
           onReturnToNetPress={(active) => {
             if (engineRef.current) {
@@ -251,14 +258,9 @@ const App: React.FC = () => {
           onChangeCalibrateTab={handleChangeCalibrateTab}
           onToggleCalibrate={handleToggleCalibrate}
           courtOffset={courtOffset}
-          fov={fov}
           onChangeOffset={(next) => {
             setCourtOffset(next);
             engineRef.current?.sceneMgr.setCourtOffset(next);
-          }}
-          onChangeFov={(nextFov) => {
-            setFov(nextFov);
-            engineRef.current?.sceneMgr.setFov(nextFov);
           }}
           onCopyViewConfig={() => engineRef.current?.sceneMgr.getViewConfigJson() ?? '{}'}
         />

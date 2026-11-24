@@ -8,9 +8,7 @@ interface CalibratorPanelProps {
   activeTab: CalibratorTab;
   onChangeTab: (tab: CalibratorTab) => void;
   offset: CourtOffsetConfig;
-  fov: number;
   onChangeOffset: (next: CourtOffsetConfig) => void;
-  onChangeFov: (fov: number) => void;
   onCopyViewConfig: () => string;
   onExit: () => void;
 }
@@ -20,9 +18,7 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
   activeTab,
   onChangeTab,
   offset,
-  fov,
   onChangeOffset,
-  onChangeFov,
   onCopyViewConfig,
   onExit,
 }) => {
@@ -77,22 +73,9 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
       </div>
 
       {activeTab === 'camera' ? (
-        <>
-          <div className="cal-hint">
-            Drag: Angle &amp; Orbit · 2-Finger: Pan · Pinch: Zoom
-          </div>
-          <label className="cal-row">
-            <span>FOV ({fov.toFixed(0)}°)</span>
-            <input
-              type="range"
-              min={25}
-              max={80}
-              step={1}
-              value={fov}
-              onChange={(e) => onChangeFov(parseFloat(e.target.value))}
-            />
-          </label>
-        </>
+        <div className="cal-hint">
+          Drag: Angle &amp; Orbit · 2-Finger: Pan · Pinch / Scroll: Zoom
+        </div>
       ) : (
         <>
           <div className="cal-hint">
@@ -129,7 +112,7 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
       )}
 
       <button className="action-btn primary full" onClick={handleCopy}>
-        {copied ? 'Copied JSON to Clipboard!' : 'Copy View Config'}
+        {copied ? 'Copied Camera & Placement JSON!' : 'Copy Camera & Placement'}
       </button>
     </div>
   );

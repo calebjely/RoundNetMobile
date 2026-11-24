@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CourtOffsetConfig } from '../config/maps';
 import { JoystickVisualState } from '../engine/InputManager';
 import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
+import { OffscreenLandingHint } from '../engine/SceneManager';
 import { CalibratorPanel, CalibratorTab } from './CalibratorPanel';
 import { MenuDrawer } from './MenuDrawer';
 
@@ -9,6 +10,7 @@ interface GameHUDProps {
   hud: MatchHUDState;
   joystick: JoystickVisualState;
   popups: TimingPopup[];
+  offscreenLanding: OffscreenLandingHint;
   returnToNetActive: boolean;
   onReturnToNetPress: (active: boolean) => void;
   onResetRally: () => void;
@@ -18,9 +20,7 @@ interface GameHUDProps {
   onChangeCalibrateTab: (tab: CalibratorTab) => void;
   onToggleCalibrate: () => void;
   courtOffset: CourtOffsetConfig;
-  fov: number;
   onChangeOffset: (next: CourtOffsetConfig) => void;
-  onChangeFov: (fov: number) => void;
   onCopyViewConfig: () => string;
 }
 
@@ -28,6 +28,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   hud,
   joystick,
   popups,
+  offscreenLanding,
   returnToNetActive,
   onReturnToNetPress,
   onResetRally,
@@ -37,9 +38,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onChangeCalibrateTab,
   onToggleCalibrate,
   courtOffset,
-  fov,
   onChangeOffset,
-  onChangeFov,
   onCopyViewConfig,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -123,6 +122,20 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       ))}
 
+      {/* Off-Screen Ball Landing Indicator Arrow */}
+      {offscreenLanding.visible && (
+        <div
+          className="offscreen-landing-arrow"
+          style={{
+            left: offscreenLanding.screenX,
+            top: offscreenLanding.screenY,
+            transform: `translate(-50%, -50%) rotate(${offscreenLanding.angleDeg}deg)`,
+          }}
+        >
+          ➤
+        </div>
+      )}
+
       {/* Bottom-Left Circular Gaming Button: Return to Net */}
       <div className="bottom-left-cluster">
         <button
@@ -173,9 +186,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         activeTab={calibrateTab}
         onChangeTab={onChangeCalibrateTab}
         offset={courtOffset}
-        fov={fov}
         onChangeOffset={onChangeOffset}
-        onChangeFov={onChangeFov}
         onCopyViewConfig={onCopyViewConfig}
         onExit={onToggleCalibrate}
       />

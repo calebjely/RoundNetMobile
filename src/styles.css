@@ -533,3 +533,20 @@ body,
   color: #94a3b8;
   text-align: center;
 }
+
+.offscreen-landing-arrow {
+  position: fixed;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.88);
+  border: 2px solid #facc15;
+  color: #facc15;
+  font-size: 16px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.55);
+  z-index: 25;
+}

@@ -12,6 +12,13 @@ export interface SceneLoadResult {
   usingProceduralFallback: boolean;
 }
 
+export interface OffscreenLandingHint {
+  visible: boolean;
+  screenX: number;
+  screenY: number;
+  angleDeg: number;
+}
+
 export class SceneManager {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
@@ -44,6 +51,12 @@ export class SceneManager {
 
   private netArrowGroup!: THREE.Group;
   private landingRingMesh!: THREE.Mesh;
+  private offscreenLandingHint: OffscreenLandingHint = {
+    visible: false,
+    screenX: 0,
+    screenY: 0,
+    angleDeg: 0,
+  };
 
   private proceduralEnvGroup: THREE.Group | null = null;
   private readonly gltfLoader = new GLTFLoader();
@@ -620,6 +633,10 @@ export class SceneManager {
     this.scene.add(ring);
   }
 
+  public getOffscreenLandingHint(): OffscreenLandingHint {
+    return { ...this.offscreenLandingHint };
+  }
+
   public updateBallIndicators(
     ballPos: THREE.Vector3,
     ballVel: THREE.Vector3,
@@ -628,6 +645,7 @@ export class SceneManager {
     if (!isLive) {
       this.netArrowGroup.visible = false;
       this.landingRingMesh.visible = false;
+      this.offscreenLandingHint.visible = false;
       return;
     }
 
@@ -658,11 +676,33 @@ export class SceneManager {
           const landZ = ballPos.z + ballVel.z * t * dragAtten;
           this.landingRingMesh.position.set(landX, 0.016, landZ);
           this.landingRingMesh.visible = true;
+
+          // Check if landing circle is off-screen
+          const proj = this.landingRingMesh.position.clone().project(this.camera);
+          const isOffscreen =
+            proj.z > 1 || Math.abs(proj.x) > 0.9 || Math.abs(proj.y) > 0.9;
+          if (isOffscreen) {
+            let nx = proj.z > 1 ? -proj.x : proj.x;
+            let ny = proj.z > 1 ? -proj.y : proj.y;
+            const maxAxis = Math.max(Math.abs(nx), Math.abs(ny), 0.001);
+            nx /= maxAxis;
+            ny /= maxAxis;
+            const pad = 42;
+            const halfW = window.innerWidth * 0.5 - pad;
+            const halfH = window.innerHeight * 0.5 - pad;
+            const sx = window.innerWidth * 0.5 + nx * halfW;
+            const sy = window.innerHeight * 0.5 - ny * halfH;
+            const angleDeg = (Math.atan2(-ny, nx) * 180) / Math.PI;
+            this.offscreenLandingHint = { visible: true, screenX: sx, screenY: sy, angleDeg };
+          } else {
+            this.offscreenLandingHint.visible = false;
+          }
           return;
         }
       }
     }
     this.landingRingMesh.visible = false;
+    this.offscreenLandingHint.visible = false;
   }
 
   public setCalibrateMode(enabled: boolean): void {
@@ -809,8 +849,10 @@ export class SceneManager {
   }
 
   /**
-   * Press-box camera with main focus on the net, blended with the ball,
-   * subtle panning & rotation, and Dynamic Zoom Guard.
+   * Press-box camera:
+   * - Starts at calibrated base view for the serve.
+   * - Main focus on the net, blended gently with the ball, with subtle panning & rotation.
+   * - Always keeps all 4 players + ball inside the frame; zooming out also pitches more downward.
    */
   public updateCamera(
     trackedPoints: THREE.Vector3[],
@@ -828,29 +870,45 @@ export class SceneManager {
       proj.copy(p).project(this.camera);
       maxEdge = Math.max(maxEdge, Math.abs(proj.x), Math.abs(proj.y));
     }
-
-    let targetZoom = 1.0;
-    if (maxEdge > 0.78) {
-      targetZoom = Math.min(this.mapConfig.maxZoomOutFactor, 1.0 + (maxEdge - 0.78) * 1.35);
+    if (this.landingRingMesh.visible) {
+      proj.copy(this.landingRingMesh.position).project(this.camera);
+      maxEdge = Math.max(maxEdge, Math.abs(proj.x), Math.abs(proj.y));
     }
 
-    const lerpRate = 1 - Math.exp(-dt * 3.8);
-    this.currentZoomFactor += (targetZoom - this.currentZoomFactor) * lerpRate;
+    let targetZoom = 1.0;
+    if (maxEdge > 0.72) {
+      targetZoom = Math.min(2.25, 1.0 + (maxEdge - 0.72) * 2.1);
+    }
+
+    // Zoom out quickly for fast chases, ease back in smoothly
+    const zoomRate =
+      targetZoom > this.currentZoomFactor
+        ? 1 - Math.exp(-dt * 6.5)
+        : 1 - Math.exp(-dt * 2.8);
+    this.currentZoomFactor += (targetZoom - this.currentZoomFactor) * zoomRate;
+
+    const lerpRate = 1 - Math.exp(-dt * 4.2);
 
     // Main focus on the net, blended gently toward the ball
     const desiredTarget = this.baseCamTarget
       .clone()
-      .lerp(new THREE.Vector3(ballPos.x, Math.max(0.35, ballPos.y * 0.5), ballPos.z), 0.3);
+      .lerp(new THREE.Vector3(ballPos.x, Math.max(0.35, ballPos.y * 0.45), ballPos.z), 0.28);
 
-    // Subtle panning & yaw rotation around the net following play
-    const baseOffset = this.baseCamPos.clone().sub(this.baseCamTarget).multiplyScalar(this.currentZoomFactor);
+    // Subtle panning & yaw rotation around the net following play, plus downward pitch when zoomed out
+    const baseOffset = this.baseCamPos
+      .clone()
+      .sub(this.baseCamTarget)
+      .multiplyScalar(this.currentZoomFactor);
     const yawAngle = THREE.MathUtils.clamp(ballPos.x * 0.032, -0.22, 0.22);
     baseOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+
+    // Moving out rotates more down-looking (extra Y elevation)
+    const extraDownLookY = Math.max(0, this.currentZoomFactor - 1.0) * 3.8;
 
     const desiredPos = this.baseCamTarget
       .clone()
       .add(baseOffset)
-      .add(new THREE.Vector3(ballPos.x * 0.22, 0, ballPos.z * 0.14));
+      .add(new THREE.Vector3(ballPos.x * 0.22, extraDownLookY, ballPos.z * 0.14));
 
     this.currentCamTarget.lerp(desiredTarget, lerpRate);
     this.currentCamPos.lerp(desiredPos, lerpRate);
