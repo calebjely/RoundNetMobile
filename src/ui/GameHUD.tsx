@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CourtOffsetConfig } from '../config/maps';
 import { JoystickVisualState } from '../engine/InputManager';
 import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
-import { CalibratorPanel } from './CalibratorPanel';
+import { CalibratorPanel, CalibratorTab } from './CalibratorPanel';
 import { MenuDrawer } from './MenuDrawer';
 
 interface GameHUDProps {
@@ -14,6 +14,8 @@ interface GameHUDProps {
   onResetRally: () => void;
   onResetMatch: (pointsToWin: 15 | 21) => void;
   calibrateMode: boolean;
+  calibrateTab: CalibratorTab;
+  onChangeCalibrateTab: (tab: CalibratorTab) => void;
   onToggleCalibrate: () => void;
   courtOffset: CourtOffsetConfig;
   fov: number;
@@ -31,6 +33,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onResetRally,
   onResetMatch,
   calibrateMode,
+  calibrateTab,
+  onChangeCalibrateTab,
   onToggleCalibrate,
   courtOffset,
   fov,
@@ -181,6 +185,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
       <CalibratorPanel
         visible={calibrateMode}
+        activeTab={calibrateTab}
+        onChangeTab={onChangeCalibrateTab}
         offset={courtOffset}
         fov={fov}
         onChangeOffset={onChangeOffset}

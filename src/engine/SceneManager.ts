@@ -25,6 +25,10 @@ export class SceneManager {
   private readonly mapConfig: MapConfig;
   private courtOffset: CourtOffsetConfig;
   private calibrateMode = false;
+  private calibrateTab: 'camera' | 'net' = 'camera';
+  private netPointers = new Map<number, { x: number; y: number }>();
+  private netPrevPinchDist = 0;
+  private onCourtOffsetSync?: (offset: CourtOffsetConfig) => void;
 
   private netDiscMesh!: THREE.Mesh;
   private netBasePositions!: Float32Array;
@@ -82,6 +86,13 @@ export class SceneManager {
     this.orbitControls.enableDamping = true;
     this.orbitControls.dampingFactor = 0.08;
     this.orbitControls.enabled = false;
+
+    const dom = this.renderer.domElement;
+    dom.addEventListener('pointerdown', this.onNetCalPointerDown);
+    window.addEventListener('pointermove', this.onNetCalPointerMove);
+    window.addEventListener('pointerup', this.onNetCalPointerUp);
+    window.addEventListener('pointercancel', this.onNetCalPointerUp);
+    dom.addEventListener('wheel', this.onNetCalWheel, { passive: false });
 
     this.courtGroup = new THREE.Group();
     this.courtGroup.name = 'courtGroup';
@@ -531,14 +542,93 @@ export class SceneManager {
 
   public setCalibrateMode(enabled: boolean): void {
     this.calibrateMode = enabled;
-    this.orbitControls.enabled = enabled;
+    this.netPointers.clear();
+    this.netPrevPinchDist = 0;
+    this.orbitControls.enabled = enabled && this.calibrateTab === 'camera';
     if (!enabled) {
-      this.camera.position.copy(this.baseCamPos);
-      this.orbitControls.target.copy(this.baseCamTarget);
-      this.camera.lookAt(this.baseCamTarget);
+      // Keep calibrated camera for immediate playtesting
+      this.baseCamPos.copy(this.camera.position);
+      this.baseCamTarget.copy(this.orbitControls.target);
       this.currentZoomFactor = 1.0;
     }
   }
+
+  public setCalibrateTab(tab: 'camera' | 'net'): void {
+    this.calibrateTab = tab;
+    this.netPointers.clear();
+    this.netPrevPinchDist = 0;
+    this.orbitControls.enabled = this.calibrateMode && tab === 'camera';
+  }
+
+  public setCourtOffsetSyncCallback(cb: (offset: CourtOffsetConfig) => void): void {
+    this.onCourtOffsetSync = cb;
+  }
+
+  private onNetCalPointerDown = (e: PointerEvent): void => {
+    if (!this.calibrateMode || this.calibrateTab !== 'net') return;
+    this.netPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.netPointers.size === 2) {
+      const pts = Array.from(this.netPointers.values());
+      this.netPrevPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    }
+  };
+
+  private onNetCalPointerMove = (e: PointerEvent): void => {
+    if (!this.calibrateMode || this.calibrateTab !== 'net') return;
+    const prev = this.netPointers.get(e.pointerId);
+    if (!prev) return;
+
+    const dx = e.clientX - prev.x;
+    const dy = e.clientY - prev.y;
+    this.netPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (this.netPointers.size === 1) {
+      // Drag to set horizontal placement (X / Z) relative to camera view
+      const camForward = new THREE.Vector3();
+      this.camera.getWorldDirection(camForward);
+      camForward.y = 0;
+      if (camForward.lengthSq() > 0.0001) camForward.normalize();
+      const camRight = new THREE.Vector3().crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
+
+      const camDist = this.camera.position.distanceTo(this.orbitControls.target);
+      const sensitivity = camDist * 0.0014;
+      const moveVec = new THREE.Vector3()
+        .addScaledVector(camRight, dx * sensitivity)
+        .addScaledVector(camForward, -dy * sensitivity);
+
+      this.courtOffset.position[0] += moveVec.x;
+      this.courtOffset.position[2] += moveVec.z;
+      this.applyCourtOffset();
+      this.onCourtOffsetSync?.(this.getCourtOffset());
+    } else if (this.netPointers.size === 2) {
+      // Pinch to set scale
+      const pts = Array.from(this.netPointers.values());
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (this.netPrevPinchDist > 10) {
+        const ratio = dist / this.netPrevPinchDist;
+        this.courtOffset.scale = THREE.MathUtils.clamp(this.courtOffset.scale * ratio, 0.2, 3.0);
+        this.applyCourtOffset();
+        this.onCourtOffsetSync?.(this.getCourtOffset());
+      }
+      this.netPrevPinchDist = dist;
+    }
+  };
+
+  private onNetCalPointerUp = (e: PointerEvent): void => {
+    this.netPointers.delete(e.pointerId);
+    if (this.netPointers.size < 2) {
+      this.netPrevPinchDist = 0;
+    }
+  };
+
+  private onNetCalWheel = (e: WheelEvent): void => {
+    if (!this.calibrateMode || this.calibrateTab !== 'net') return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.04 : 0.96;
+    this.courtOffset.scale = THREE.MathUtils.clamp(this.courtOffset.scale * factor, 0.2, 3.0);
+    this.applyCourtOffset();
+    this.onCourtOffsetSync?.(this.getCourtOffset());
+  };
 
   public isCalibrateMode(): boolean {
     return this.calibrateMode;
@@ -638,6 +728,12 @@ export class SceneManager {
 
   public dispose(): void {
     window.removeEventListener('resize', this.handleResize);
+    const dom = this.renderer.domElement;
+    dom.removeEventListener('pointerdown', this.onNetCalPointerDown);
+    window.removeEventListener('pointermove', this.onNetCalPointerMove);
+    window.removeEventListener('pointerup', this.onNetCalPointerUp);
+    window.removeEventListener('pointercancel', this.onNetCalPointerUp);
+    dom.removeEventListener('wheel', this.onNetCalWheel);
     this.orbitControls.dispose();
     this.renderer.dispose();
   }

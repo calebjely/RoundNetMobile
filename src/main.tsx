@@ -9,6 +9,7 @@ import { InputManager, JoystickVisualState } from './engine/InputManager';
 import { MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
 import { PhysicsWorld } from './engine/PhysicsWorld';
 import { SceneManager } from './engine/SceneManager';
+import { CalibratorTab } from './ui/CalibratorPanel';
 import { GameHUD } from './ui/GameHUD';
 import './styles.css';
 
@@ -31,12 +32,14 @@ const App: React.FC = () => {
   const [calibrateMode, setCalibrateMode] = useState(
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
+  const [calibrateTab, setCalibrateTab] = useState<CalibratorTab>('camera');
   const [courtOffset, setCourtOffset] = useState<CourtOffsetConfig>(mapConfig.courtOffset);
   const [fov, setFov] = useState<number>(mapConfig.fov);
 
   const engineRef = useRef<{
     sceneMgr: SceneManager;
     matchMgr: MatchManager;
+    inputMgr: InputManager;
     human: CharacterController;
     returnToNet: boolean;
   } | null>(null);
@@ -49,9 +52,11 @@ const App: React.FC = () => {
     let rafId = 0;
 
     const sceneMgr = new SceneManager(container, mapConfig);
-    if (new URLSearchParams(window.location.search).get('calibrate') === '1') {
+    const initialCalibrate = new URLSearchParams(window.location.search).get('calibrate') === '1';
+    if (initialCalibrate) {
       sceneMgr.setCalibrateMode(true);
     }
+    sceneMgr.setCourtOffsetSyncCallback((next) => setCourtOffset(next));
 
     const physics = new PhysicsWorld();
     const players: CharacterController[] = PHASE1_LINEUP.map(
@@ -102,10 +107,12 @@ const App: React.FC = () => {
           setReturnToNetActive(false);
         },
       });
+      inputMgr.enabled = !initialCalibrate;
 
       engineRef.current = {
         sceneMgr,
         matchMgr,
+        inputMgr,
         human,
         returnToNet: false,
       };
@@ -114,6 +121,7 @@ const App: React.FC = () => {
         if (e.code === 'F2') {
           const next = !sceneMgr.isCalibrateMode();
           sceneMgr.setCalibrateMode(next);
+          inputMgr.enabled = !next;
           setCalibrateMode(next);
         }
       };
@@ -204,7 +212,13 @@ const App: React.FC = () => {
     if (!inst) return;
     const next = !inst.sceneMgr.isCalibrateMode();
     inst.sceneMgr.setCalibrateMode(next);
+    inst.inputMgr.enabled = !next;
     setCalibrateMode(next);
+  };
+
+  const handleChangeCalibrateTab = (tab: CalibratorTab) => {
+    setCalibrateTab(tab);
+    engineRef.current?.sceneMgr.setCalibrateTab(tab);
   };
 
   return (
@@ -225,6 +239,8 @@ const App: React.FC = () => {
           onResetRally={() => engineRef.current?.matchMgr.resetRally()}
           onResetMatch={(pts) => engineRef.current?.matchMgr.resetMatch(pts)}
           calibrateMode={calibrateMode}
+          calibrateTab={calibrateTab}
+          onChangeCalibrateTab={handleChangeCalibrateTab}
           onToggleCalibrate={handleToggleCalibrate}
           courtOffset={courtOffset}
           fov={fov}

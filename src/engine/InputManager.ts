@@ -55,6 +55,7 @@ export class InputManager {
 
   // Desktop keyboard fallback
   private keys = new Set<string>();
+  public enabled = true;
 
   constructor(element: HTMLElement, callbacks: InputCallbacks) {
     this.element = element;
@@ -69,6 +70,7 @@ export class InputManager {
   }
 
   private onPointerDown = (e: PointerEvent): void => {
+    if (!this.enabled) return;
     // Ignore clicks on UI buttons/drawers
     const target = e.target as HTMLElement | null;
     if (target && target.closest('[data-ui-interactive="true"]')) {
