@@ -147,6 +147,24 @@ const App: React.FC = () => {
 
         // Human movement (Joystick or Return-to-Net auto-sprint)
         let { dir, deflection } = inputMgr.getMoveIntent();
+        if (deflection > 0.04) {
+          // Orient joystick input relative to the camera's ground-plane forward/right vectors
+          const camForward = new THREE.Vector3();
+          sceneMgr.camera.getWorldDirection(camForward);
+          camForward.y = 0;
+          if (camForward.lengthSq() > 0.0001) {
+            camForward.normalize();
+          } else {
+            camForward.set(0, 0, -1);
+          }
+          const camRight = new THREE.Vector3()
+            .crossVectors(camForward, new THREE.Vector3(0, 1, 0))
+            .normalize();
+
+          const worldX = camRight.x * dir.x + camForward.x * -dir.y;
+          const worldZ = camRight.z * dir.x + camForward.z * -dir.y;
+          dir.set(worldX, worldZ).normalize();
+        }
         if (engineRef.current?.returnToNet && deflection < 0.05) {
           // Optimal defensive net spacing (~2.5 m from (0,0,0) on human's side)
           const target = new THREE.Vector3(0, 0, 2.5);

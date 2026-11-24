@@ -11,6 +11,7 @@ export class BotController {
   private readonly physics: PhysicsWorld;
   private readonly match: MatchManager;
   private hitCooldowns = new Map<number, number>();
+  private globalTouchCooldown = 0;
 
   constructor(players: CharacterController[], physics: PhysicsWorld, match: MatchManager) {
     this.players = players;
@@ -19,7 +20,9 @@ export class BotController {
   }
 
   public update(dt: number): void {
+    this.globalTouchCooldown = Math.max(0, this.globalTouchCooldown - dt);
     const ballPos = this.physics.getBallPosition();
+    const ballVel = this.physics.getBallVelocity();
     const phase = this.match.phase;
 
     for (const bot of this.players) {
@@ -39,7 +42,7 @@ export class BotController {
         const isMyTeamsTurn =
           phase === 'SERVE_IN_FLIGHT'
             ? bot.team !== this.match.getServingTeam()
-            : this.match.possessionTeam === bot.team || this.match.teamTouches === 0;
+            : this.match.possessionTeam === bot.team;
 
         const canThisBotTouch =
           this.match.possessionTeam !== bot.team ||
@@ -75,11 +78,13 @@ export class BotController {
               deflection = dist > 1.8 ? 0.88 : 0.5;
             }
 
-            // Execute bot touch when ball is within reach and descending or playable height
+            // Execute bot touch when ball is within reach, cooldown elapsed, and ball isn't rising steeply away
             const reach = bot.getEffectiveReach() * 0.92;
-            if (cd <= 0 && dist <= reach && ballPos.y >= 0.22 && ballPos.y <= 1.85) {
+            const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= 1.85 && ballVel.y < 2.2;
+            if (cd <= 0 && this.globalTouchCooldown <= 0 && dist <= reach && ballPlayable) {
               this.performBotShot(bot, ballPos);
-              this.hitCooldowns.set(idx, 0.45);
+              this.hitCooldowns.set(idx, 0.55);
+              this.globalTouchCooldown = 0.28;
             }
           } else {
             this.moveToSupportPosition(bot, moveIntent);

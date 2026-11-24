@@ -341,6 +341,7 @@ export class MatchManager {
       this.possessionTeam = hittingTeam === 'A' ? 'B' : 'A';
       this.teamTouches = 0;
       this.lastTouchPlayerIdx = -1;
+      this.lastAttackTeam = null;
       this.isFirstPossessionAfterServe = false;
     }
   }
