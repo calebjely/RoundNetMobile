@@ -78,6 +78,13 @@ export class CharacterController {
   private actions = new Map<AnimState, THREE.AnimationAction>();
   private currentAction: THREE.AnimationAction | null = null;
 
+  // Mixamo skeleton bone bindings for procedural animation when .glb has no embedded clips
+  private mixamoRig: {
+    modelRoot: THREE.Object3D;
+    baseY: number;
+    bones: Map<string, { bone: THREE.Object3D; restQuat: THREE.Quaternion; restPos: THREE.Vector3 }>;
+  } | null = null;
+
   // Articulated fallback rig parts for procedural animation
   private fallbackParts: {
     bodyGroup: THREE.Group;
@@ -114,18 +121,40 @@ export class CharacterController {
     const template = await loadStarterTemplate();
     if (template) {
       const cloned = SkeletonUtils.clone(template.scene);
+      const bones = new Map<
+        string,
+        { bone: THREE.Object3D; restQuat: THREE.Quaternion; restPos: THREE.Vector3 }
+      >();
+
       cloned.traverse((obj) => {
+        if (obj.name.startsWith('mixamorig')) {
+          bones.set(obj.name, {
+            bone: obj,
+            restQuat: obj.quaternion.clone(),
+            restPos: obj.position.clone(),
+          });
+        }
         if (obj instanceof THREE.Mesh) {
           obj.castShadow = true;
           obj.receiveShadow = true;
+          obj.frustumCulled = false;
           const name = obj.name.toLowerCase();
-          if (name.includes('shirt') || name.includes('torso') || name.includes('top') || name.includes('body')) {
+          if (name.includes('shirt') || name.includes('torso') || name.includes('top')) {
             const mat = (obj.material as THREE.MeshStandardMaterial).clone();
             mat.color.setHex(TEAM_COLORS[this.team].hex);
+            mat.emissive.setHex(TEAM_COLORS[this.team].hex);
+            mat.emissiveIntensity = 0.16;
             obj.material = mat;
           }
         }
       });
+
+      // Normalize vertical placement so feet sit cleanly on y = 0
+      const bbox = new THREE.Box3().setFromObject(cloned);
+      if (Number.isFinite(bbox.min.y)) {
+        cloned.position.y -= bbox.min.y;
+      }
+
       this.root.add(cloned);
 
       if (template.animations.length > 0) {
@@ -150,16 +179,8 @@ export class CharacterController {
           }
         }
         this.setAnimState('idle');
-      } else {
-        // Still attach procedural fallback reference on root if no clips packed
-        this.fallbackParts = {
-          bodyGroup: cloned as THREE.Group,
-          leftArm: cloned,
-          rightArm: cloned,
-          leftLeg: cloned,
-          rightLeg: cloned,
-          head: cloned,
-        };
+      } else if (bones.size > 0) {
+        this.mixamoRig = { modelRoot: cloned, baseY: cloned.position.y, bones };
       }
       return;
     }
@@ -510,7 +531,149 @@ export class CharacterController {
     if (this.mixer) {
       this.mixer.update(dt);
     }
+    this.updateMixamoProceduralRig();
     this.updateProceduralRig();
+  }
+
+  private setBoneDelta(name: string, rx: number, ry: number, rz: number): void {
+    const entry = this.mixamoRig?.bones.get(name);
+    if (!entry) return;
+    const delta = new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
+    entry.bone.quaternion.copy(entry.restQuat).multiply(delta);
+  }
+
+  private updateMixamoProceduralRig(): void {
+    if (!this.mixamoRig) return;
+    const t = this.animClock;
+
+    // Reset all driven bones to rest pose first
+    for (const entry of this.mixamoRig.bones.values()) {
+      entry.bone.quaternion.copy(entry.restQuat);
+    }
+    this.mixamoRig.modelRoot.rotation.set(0, 0, 0);
+    this.mixamoRig.modelRoot.position.y = this.mixamoRig.baseY;
+
+    // Natural athletic arms-down base pose (out of Mixamo T-pose)
+    let lArmX = 1.12;
+    let rArmX = 1.12;
+    let lArmZ = 0.16;
+    let rArmZ = -0.16;
+    let lForeZ = 0.42;
+    let rForeZ = -0.42;
+    let lThighX = 0.08;
+    let rThighX = 0.08;
+    let lKneeX = -0.16;
+    let rKneeX = -0.16;
+    let spineX = 0.1;
+
+    switch (this.animState) {
+      case 'idle': {
+        const breathe = Math.sin(t * 2.5) * 0.04;
+        spineX = 0.12 + breathe * 0.5;
+        lArmX = 1.08 + breathe;
+        rArmX = 1.08 + breathe;
+        lForeZ = 0.55;
+        rForeZ = -0.55;
+        break;
+      }
+      case 'walk':
+      case 'sprint': {
+        const isSprint = this.animState === 'sprint';
+        const freq = isSprint ? 12.5 : 7.5;
+        const stride = isSprint ? 0.85 : 0.48;
+        const s = Math.sin(t * freq);
+        const c = Math.cos(t * freq);
+
+        spineX = isSprint ? 0.28 : 0.12;
+        lThighX = s * stride;
+        rThighX = -s * stride;
+        lKneeX = -Math.max(0.08, -c * (isSprint ? 1.1 : 0.65));
+        rKneeX = -Math.max(0.08, c * (isSprint ? 1.1 : 0.65));
+
+        lArmX = 1.18;
+        rArmX = 1.18;
+        lArmZ = -s * (isSprint ? 0.75 : 0.4);
+        rArmZ = -s * (isSprint ? 0.75 : 0.4);
+        lForeZ = isSprint ? 1.15 : 0.55;
+        rForeZ = isSprint ? -1.15 : -0.55;
+        this.mixamoRig.modelRoot.position.y =
+          this.mixamoRig.baseY + Math.abs(s) * (isSprint ? 0.06 : 0.025);
+        break;
+      }
+      case 'dive': {
+        this.mixamoRig.modelRoot.rotation.x = Math.PI * 0.42;
+        this.mixamoRig.modelRoot.position.y = this.mixamoRig.baseY + 0.34;
+        lArmX = -0.45;
+        rArmX = -0.45;
+        lArmZ = 0.55;
+        rArmZ = -0.55;
+        lForeZ = 0.15;
+        rForeZ = -0.15;
+        lThighX = -0.25;
+        rThighX = -0.25;
+        break;
+      }
+      case 'get_up': {
+        spineX = 0.55;
+        lThighX = 0.55;
+        rThighX = 0.35;
+        lKneeX = -0.85;
+        rKneeX = -0.65;
+        break;
+      }
+      case 'block': {
+        spineX = 0.05;
+        lArmX = -1.15;
+        rArmX = -1.15;
+        lArmZ = 0.22;
+        rArmZ = -0.22;
+        lForeZ = 0.2;
+        rForeZ = -0.2;
+        break;
+      }
+      case 'spike':
+      case 'serve_hit': {
+        spineX = 0.25;
+        rArmX = -1.05;
+        rArmZ = -0.55;
+        rForeZ = -0.25;
+        lArmX = 0.95;
+        lArmZ = 0.2;
+        break;
+      }
+      case 'hit_high':
+      case 'serve_toss': {
+        spineX = 0.08;
+        rArmX = 0.35;
+        rArmZ = -0.75;
+        rForeZ = -0.55;
+        lArmX = 0.55;
+        lArmZ = 0.55;
+        break;
+      }
+      case 'hit_low': {
+        spineX = 0.42;
+        lArmX = 0.85;
+        rArmX = 0.85;
+        lArmZ = 0.65;
+        rArmZ = -0.65;
+        lThighX = 0.42;
+        rThighX = 0.42;
+        lKneeX = -0.68;
+        rKneeX = -0.68;
+        break;
+      }
+    }
+
+    this.setBoneDelta('mixamorig:Spine', spineX, 0, 0);
+    this.setBoneDelta('mixamorig:LeftArm', lArmX, 0, lArmZ);
+    this.setBoneDelta('mixamorig:RightArm', rArmX, 0, rArmZ);
+    this.setBoneDelta('mixamorig:LeftForeArm', 0, 0, lForeZ);
+    this.setBoneDelta('mixamorig:RightForeArm', 0, 0, rForeZ);
+    this.setBoneDelta('mixamorig:LeftUpLeg', lThighX, 0, 0);
+    this.setBoneDelta('mixamorig:RightUpLeg', rThighX, 0, 0);
+    this.setBoneDelta('mixamorig:LeftLeg', lKneeX, 0, 0);
+    this.setBoneDelta('mixamorig:RightLeg', rKneeX, 0, 0);
   }
 
   private updateProceduralRig(): void {
