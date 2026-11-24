@@ -1,9 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as THREE from 'three';
 import { BotController } from './ai/BotController';
 import { PHASE1_LINEUP } from './config/characters';
-import { CourtOffsetConfig, DEFAULT_MAP_ID, MAPS } from './config/maps';
+import {
+  CourtOffsetConfig,
+  DEFAULT_MAP_ID,
+  fetchRemoteCourtConfig,
+  loadLocalCourtConfig,
+  MAPS,
+  persistCourtConfig,
+} from './config/maps';
 import { CharacterController } from './engine/CharacterController';
 import { InputManager, JoystickVisualState } from './engine/InputManager';
 import { MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
@@ -16,6 +23,7 @@ import './styles.css';
 const App: React.FC = () => {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mapConfig = MAPS[DEFAULT_MAP_ID];
+  const initialSaved = useRef(loadLocalCourtConfig(mapConfig));
 
   const [hud, setHud] = useState<MatchHUDState | null>(null);
   const [joystick, setJoystick] = useState<JoystickVisualState>({
@@ -39,8 +47,16 @@ const App: React.FC = () => {
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
   const [calibrateTab, setCalibrateTab] = useState<CalibratorTab>('camera');
+  const [calibrateServeSlot, setCalibrateServeSlot] = useState<number>(0);
   const [cameraViewMode, setCameraViewMode] = useState<'pressbox' | 'first_person'>('pressbox');
-  const [courtOffset, setCourtOffset] = useState<CourtOffsetConfig>(mapConfig.courtOffset);
+  const [courtOffset, setCourtOffset] = useState<CourtOffsetConfig>(
+    initialSaved.current.courtOffset
+  );
+  const [physicsSpeed, setPhysicsSpeed] = useState<number>(initialSaved.current.physicsSpeed);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  const physicsSpeedRef = useRef<number>(initialSaved.current.physicsSpeed);
+  const saveTimerRef = useRef<number | null>(null);
 
   const engineRef = useRef<{
     sceneMgr: SceneManager;
@@ -50,6 +66,26 @@ const App: React.FC = () => {
     returnToNet: boolean;
   } | null>(null);
 
+  const saveConfigToBackend = useCallback(async () => {
+    const inst = engineRef.current;
+    if (!inst) return;
+    setSaveStatus('saving');
+    const cfg = inst.sceneMgr.getSavedConfig(physicsSpeedRef.current);
+    await persistCourtConfig(cfg);
+    setSaveStatus('saved');
+    window.setTimeout(() => setSaveStatus('idle'), 1500);
+  }, []);
+
+  const scheduleAutoSave = useCallback(() => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      saveConfigToBackend();
+    }, 550);
+  }, [saveConfigToBackend]);
+
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return;
@@ -57,12 +93,21 @@ const App: React.FC = () => {
     let disposed = false;
     let rafId = 0;
 
-    const sceneMgr = new SceneManager(container, mapConfig);
+    const sceneMgr = new SceneManager(container, mapConfig, initialSaved.current);
     const initialCalibrate = new URLSearchParams(window.location.search).get('calibrate') === '1';
     if (initialCalibrate) {
       sceneMgr.setCalibrateMode(true);
+    } else {
+      sceneMgr.startIntroSpin();
     }
-    sceneMgr.setCourtOffsetSyncCallback((next) => setCourtOffset(next));
+
+    sceneMgr.setCourtOffsetSyncCallback((next) => {
+      setCourtOffset(next);
+      scheduleAutoSave();
+    });
+    sceneMgr.setCameraPresetChangedCallback(() => {
+      scheduleAutoSave();
+    });
 
     const physics = new PhysicsWorld();
     const players: CharacterController[] = PHASE1_LINEUP.map(
@@ -75,6 +120,15 @@ const App: React.FC = () => {
     let inputMgr: InputManager;
 
     const init = async () => {
+      // Sync remote R2-persisted config if available
+      fetchRemoteCourtConfig(mapConfig).then((remote) => {
+        if (disposed || !remote) return;
+        sceneMgr.applySavedConfig(remote);
+        setCourtOffset(remote.courtOffset);
+        setPhysicsSpeed(remote.physicsSpeed);
+        physicsSpeedRef.current = remote.physicsSpeed;
+      });
+
       await physics.init({
         onNetHit: (x, z, speed) => matchMgr?.onNetHit(x, z, speed),
         onRimHit: (x, z) => matchMgr?.onRimHit(x, z),
@@ -83,7 +137,6 @@ const App: React.FC = () => {
       });
       if (disposed) return;
 
-      // Load map splat/collision & character models asynchronously
       const mapResult = await sceneMgr.loadMapAssets();
       if (disposed) return;
       if (mapResult.collisionRoot) {
@@ -100,6 +153,7 @@ const App: React.FC = () => {
 
       inputMgr = new InputManager(container, {
         onSwipe: (swipe) => {
+          sceneMgr.skipIntroSpin();
           const camFwd = new THREE.Vector3();
           sceneMgr.camera.getWorldDirection(camFwd);
           camFwd.y = 0;
@@ -110,12 +164,14 @@ const App: React.FC = () => {
           matchMgr.handleHumanSwipe(swipe, camRight);
         },
         onBlockStart: () => {
+          sceneMgr.skipIntroSpin();
           human.isBlocking = true;
         },
         onBlockEnd: () => {
           human.isBlocking = false;
         },
         onReturnToNetCancel: () => {
+          sceneMgr.skipIntroSpin();
           if (engineRef.current) {
             engineRef.current.returnToNet = false;
           }
@@ -138,27 +194,36 @@ const App: React.FC = () => {
           sceneMgr.setCalibrateMode(next);
           inputMgr.enabled = !next;
           setCalibrateMode(next);
+          if (!next) saveConfigToBackend();
         }
       };
       window.addEventListener('keydown', onKeyDown);
 
-      // Disable browser context menu on long press
       const onContextMenu = (e: MouseEvent) => e.preventDefault();
       container.addEventListener('contextmenu', onContextMenu);
 
       let lastTime = performance.now();
       let hudSyncAccum = 0;
+      let physicsAccum = 0;
+      const fixedDt = 1 / 60;
       const ballPos = new THREE.Vector3();
 
       const tick = (now: number) => {
         if (disposed) return;
-        const dt = Math.min(0.05, Math.max(0.001, (now - lastTime) / 1000));
+        const rawDt = Math.min(0.05, Math.max(0.001, (now - lastTime) / 1000));
         lastTime = now;
+
+        const speedMult = physicsSpeedRef.current;
+        const simDt = rawDt * speedMult;
+
+        // Switch press-box camera preset automatically when the server slot rotates
+        const activeServerSlot = matchMgr.getCurrentServer().config.slotIndex;
+        sceneMgr.setActiveServeCamera(activeServerSlot);
 
         // Human movement (Joystick or Return-to-Net auto-sprint)
         let { dir, deflection } = inputMgr.getMoveIntent();
         if (deflection > 0.04) {
-          // Orient joystick input relative to the camera's ground-plane forward/right vectors
+          sceneMgr.skipIntroSpin();
           const camForward = new THREE.Vector3();
           sceneMgr.camera.getWorldDirection(camForward);
           camForward.y = 0;
@@ -176,7 +241,6 @@ const App: React.FC = () => {
           dir.set(worldX, worldZ).normalize();
         }
         if (engineRef.current?.returnToNet && deflection < 0.05) {
-          // Optimal defensive net spacing (~2.5 m from (0,0,0) on human's side)
           const target = new THREE.Vector3(0, 0, 2.5);
           const toTarget = target.sub(human.position);
           const dist = Math.hypot(toTarget.x, toTarget.z);
@@ -191,30 +255,42 @@ const App: React.FC = () => {
 
         const isPreServe =
           matchMgr.phase === 'SERVE_WAIT_TOSS' || matchMgr.phase === 'SERVE_METER_ACTIVE';
-        human.update(dt, dir, deflection, isPreServe);
-        bots.update(dt);
-        physics.step(dt);
-        matchMgr.update(dt);
-        sceneMgr.updateNetRipple(dt);
+        human.update(simDt, dir, deflection, isPreServe);
+        bots.update(simDt);
+
+        // Fixed-timestep physics accumulator so mobile 30fps runs at true 1.0x+ normal speed!
+        physicsAccum += Math.min(simDt, 0.1);
+        let substeps = 0;
+        while (physicsAccum >= fixedDt && substeps < 5) {
+          physics.step(fixedDt);
+          matchMgr.update(fixedDt);
+          physicsAccum -= fixedDt;
+          substeps++;
+        }
+
+        sceneMgr.updateNetRipple(rawDt);
 
         physics.getBallPosition(ballPos);
         sceneMgr.ballMesh.position.copy(ballPos);
         const ballVel = physics.getBallVelocity();
-        sceneMgr.ballMesh.rotation.x += ballVel.z * dt * 2.5;
-        sceneMgr.ballMesh.rotation.z -= ballVel.x * dt * 2.5;
+        sceneMgr.ballMesh.rotation.x += ballVel.z * simDt * 2.5;
+        sceneMgr.ballMesh.rotation.z -= ballVel.x * simDt * 2.5;
 
         const isBallLive =
           matchMgr.phase === 'RALLY_LIVE' ||
           matchMgr.phase === 'SERVE_IN_FLIGHT' ||
           matchMgr.phase === 'SERVE_METER_ACTIVE';
-        sceneMgr.updateBallIndicators(ballPos, ballVel, isBallLive);
+        const isAimedAfterHit =
+          (matchMgr.phase === 'SERVE_IN_FLIGHT' && !matchMgr.serveReboundedOffNet) ||
+          (matchMgr.phase === 'RALLY_LIVE' && matchMgr.teamTouches > 0);
+        sceneMgr.updateBallIndicators(ballPos, ballVel, isBallLive, isAimedAfterHit);
 
         const tracked = players.map((p) => p.position);
         tracked.push(ballPos);
-        sceneMgr.updateCamera(tracked, ballPos, human.position, dt);
+        sceneMgr.updateCamera(tracked, ballPos, human.position, rawDt);
         sceneMgr.render();
 
-        hudSyncAccum += dt;
+        hudSyncAccum += rawDt;
         if (hudSyncAccum >= 0.05) {
           hudSyncAccum = 0;
           setHud(matchMgr.getHUDState());
@@ -240,6 +316,7 @@ const App: React.FC = () => {
     return () => {
       disposed = true;
       cancelAnimationFrame(rafId);
+      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
       cleanupPromise.then((fn) => fn?.());
       inputMgr?.dispose();
       sceneMgr.dispose();
@@ -247,7 +324,7 @@ const App: React.FC = () => {
         container.removeChild(sceneMgr.renderer.domElement);
       }
     };
-  }, [mapConfig]);
+  }, [mapConfig, saveConfigToBackend, scheduleAutoSave]);
 
   const handleToggleCalibrate = () => {
     const inst = engineRef.current;
@@ -256,11 +333,20 @@ const App: React.FC = () => {
     inst.sceneMgr.setCalibrateMode(next);
     inst.inputMgr.enabled = !next;
     setCalibrateMode(next);
+    if (!next) {
+      saveConfigToBackend();
+    }
   };
 
   const handleChangeCalibrateTab = (tab: CalibratorTab) => {
     setCalibrateTab(tab);
     engineRef.current?.sceneMgr.setCalibrateTab(tab);
+  };
+
+  const handleChangeCalibrateServeSlot = (slot: number) => {
+    setCalibrateServeSlot(slot);
+    engineRef.current?.sceneMgr.setCalibrateServeSlot(slot);
+    scheduleAutoSave();
   };
 
   return (
@@ -280,10 +366,15 @@ const App: React.FC = () => {
             setReturnToNetActive(active);
           }}
           onResetRally={() => engineRef.current?.matchMgr.resetRally()}
-          onResetMatch={(pts) => engineRef.current?.matchMgr.resetMatch(pts)}
+          onResetMatch={(pts) => {
+            engineRef.current?.matchMgr.resetMatch(pts);
+            engineRef.current?.sceneMgr.startIntroSpin();
+          }}
           calibrateMode={calibrateMode}
           calibrateTab={calibrateTab}
+          calibrateServeSlot={calibrateServeSlot}
           onChangeCalibrateTab={handleChangeCalibrateTab}
+          onChangeCalibrateServeSlot={handleChangeCalibrateServeSlot}
           onToggleCalibrate={handleToggleCalibrate}
           cameraViewMode={cameraViewMode}
           onChangeCameraViewMode={(mode) => {
@@ -295,11 +386,19 @@ const App: React.FC = () => {
             }
           }}
           courtOffset={courtOffset}
+          physicsSpeed={physicsSpeed}
           onChangeOffset={(next) => {
             setCourtOffset(next);
             engineRef.current?.sceneMgr.setCourtOffset(next);
+            scheduleAutoSave();
           }}
-          onCopyViewConfig={() => engineRef.current?.sceneMgr.getViewConfigJson() ?? '{}'}
+          onChangePhysicsSpeed={(spd) => {
+            setPhysicsSpeed(spd);
+            physicsSpeedRef.current = spd;
+            scheduleAutoSave();
+          }}
+          saveStatus={saveStatus}
+          onSaveNow={saveConfigToBackend}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { CourtOffsetConfig } from '../config/maps';
 
 export type CalibratorTab = 'camera' | 'net';
@@ -7,23 +7,38 @@ interface CalibratorPanelProps {
   visible: boolean;
   activeTab: CalibratorTab;
   onChangeTab: (tab: CalibratorTab) => void;
+  serveSlot: number;
+  onChangeServeSlot: (slot: number) => void;
   offset: CourtOffsetConfig;
+  physicsSpeed: number;
   onChangeOffset: (next: CourtOffsetConfig) => void;
-  onCopyViewConfig: () => string;
+  onChangePhysicsSpeed: (speed: number) => void;
+  saveStatus: 'idle' | 'saving' | 'saved';
+  onSaveNow: () => void;
   onExit: () => void;
 }
+
+const SERVE_SLOTS = [
+  { idx: 0, label: 'S1' },
+  { idx: 1, label: 'S2' },
+  { idx: 2, label: 'S3' },
+  { idx: 3, label: 'S4' },
+];
 
 export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
   visible,
   activeTab,
   onChangeTab,
+  serveSlot,
+  onChangeServeSlot,
   offset,
+  physicsSpeed,
   onChangeOffset,
-  onCopyViewConfig,
+  onChangePhysicsSpeed,
+  saveStatus,
+  onSaveNow,
   onExit,
 }) => {
-  const [copied, setCopied] = useState(false);
-
   if (!visible) return null;
 
   const updateHeight = (val: number) => {
@@ -35,23 +50,10 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
     onChangeOffset({ ...offset, position: nextPos });
   };
 
-  const handleCopy = async () => {
-    const json = onCopyViewConfig();
-    try {
-      await navigator.clipboard.writeText(json);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      console.log('Calibrator View Config:\n', json);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    }
-  };
-
   return (
     <div data-ui-interactive="true" className="calibrator-panel">
       <div className="calibrator-header">
-        <span>Scene Calibrator</span>
+        <span>Config</span>
         <button className="icon-btn" onClick={onExit} aria-label="Close calibrator">
           ✕
         </button>
@@ -68,51 +70,104 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
           className={`action-btn ${activeTab === 'net' ? 'active' : ''}`}
           onClick={() => onChangeTab('net')}
         >
-          Net &amp; Scale
+          Net
         </button>
       </div>
 
       {activeTab === 'camera' ? (
-        <div className="cal-hint">
-          Drag: Angle &amp; Orbit · 2-Finger: Pan · Pinch / Scroll: Zoom
-        </div>
+        <>
+          <div className="cal-hint">
+            Serve Angle (Drag: Orbit · Pinch: Zoom)
+          </div>
+          <div className="serve-slot-row">
+            {SERVE_SLOTS.map((s) => (
+              <button
+                key={s.idx}
+                className={`slot-btn ${serveSlot === s.idx ? 'active' : ''}`}
+                onClick={() => onChangeServeSlot(s.idx)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="v-slider-group">
+            <div className="v-slider-col">
+              <span className="v-slider-val">{physicsSpeed.toFixed(2)}x</span>
+              <input
+                className="v-slider"
+                type="range"
+                min={0.6}
+                max={2.0}
+                step={0.05}
+                value={physicsSpeed}
+                onChange={(e) => onChangePhysicsSpeed(parseFloat(e.target.value))}
+              />
+              <span className="v-slider-lbl">Speed</span>
+            </div>
+          </div>
+        </>
       ) : (
         <>
           <div className="cal-hint">
-            Drag: Placement · Pinch / Scroll: Scale ({offset.scale.toFixed(2)}x)
+            Drag: Place · Pinch: Scale ({offset.scale.toFixed(2)}x)
           </div>
-          <label className="cal-row">
-            <span>Z-Height ({offset.position[1].toFixed(2)} m)</span>
-            <input
-              type="range"
-              min={-10}
-              max={10}
-              step={0.02}
-              value={offset.position[1]}
-              onChange={(e) => updateHeight(parseFloat(e.target.value))}
-            />
-          </label>
-          <label className="cal-row">
-            <span>Rotation ({Math.round((offset.rotationY * 180) / Math.PI)}°)</span>
-            <input
-              type="range"
-              min={-Math.PI}
-              max={Math.PI}
-              step={0.01}
-              value={offset.rotationY}
-              onChange={(e) =>
-                onChangeOffset({ ...offset, rotationY: parseFloat(e.target.value) })
-              }
-            />
-          </label>
-          <div className="cal-readout">
-            X: {offset.position[0].toFixed(2)} m · Z: {offset.position[2].toFixed(2)} m
+          <div className="v-slider-group">
+            <div className="v-slider-col">
+              <span className="v-slider-val">{offset.position[1].toFixed(2)}m</span>
+              <input
+                className="v-slider"
+                type="range"
+                min={-10}
+                max={10}
+                step={0.02}
+                value={offset.position[1]}
+                onChange={(e) => updateHeight(parseFloat(e.target.value))}
+              />
+              <span className="v-slider-lbl">Z-Hgt</span>
+            </div>
+
+            <div className="v-slider-col">
+              <span className="v-slider-val">
+                {Math.round((offset.rotationY * 180) / Math.PI)}°
+              </span>
+              <input
+                className="v-slider"
+                type="range"
+                min={-Math.PI}
+                max={Math.PI}
+                step={0.01}
+                value={offset.rotationY}
+                onChange={(e) =>
+                  onChangeOffset({ ...offset, rotationY: parseFloat(e.target.value) })
+                }
+              />
+              <span className="v-slider-lbl">Rot</span>
+            </div>
+
+            <div className="v-slider-col">
+              <span className="v-slider-val">{physicsSpeed.toFixed(2)}x</span>
+              <input
+                className="v-slider"
+                type="range"
+                min={0.6}
+                max={2.0}
+                step={0.05}
+                value={physicsSpeed}
+                onChange={(e) => onChangePhysicsSpeed(parseFloat(e.target.value))}
+              />
+              <span className="v-slider-lbl">Speed</span>
+            </div>
           </div>
         </>
       )}
 
-      <button className="action-btn primary full" onClick={handleCopy}>
-        {copied ? 'Copied Camera & Placement JSON!' : 'Copy Camera & Placement'}
+      <button className="action-btn primary full" onClick={onSaveNow}>
+        {saveStatus === 'saving'
+          ? 'Saving...'
+          : saveStatus === 'saved'
+            ? 'Saved ✓'
+            : 'Save Config'}
       </button>
     </div>
   );

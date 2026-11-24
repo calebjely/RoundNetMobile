@@ -4,7 +4,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import { IRF_2026_RULES } from '../config/rules';
-import { CourtOffsetConfig, MapConfig } from '../config/maps';
+import {
+  CameraPreset,
+  CourtOffsetConfig,
+  MapConfig,
+  SavedCourtConfig,
+} from '../config/maps';
 
 export interface SceneLoadResult {
   splatLoaded: boolean;
@@ -31,12 +36,20 @@ export class SceneManager {
 
   private readonly mapConfig: MapConfig;
   private courtOffset: CourtOffsetConfig;
+  private serveCameras: [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
+  private activeServeSlot = 0;
   private calibrateMode = false;
   private calibrateTab: 'camera' | 'net' = 'camera';
+  private calibrateServeSlot = 0;
   private cameraViewMode: 'pressbox' | 'first_person' = 'pressbox';
   private netPointers = new Map<number, { x: number; y: number }>();
   private netPrevPinchDist = 0;
   private onCourtOffsetSync?: (offset: CourtOffsetConfig) => void;
+  private onCameraPresetChanged?: () => void;
+
+  // Starting game 360° intro spin animation
+  private introSpinElapsed = -1;
+  private readonly introSpinDuration = 3.0;
 
   private netDiscMesh!: THREE.Mesh;
   private netBasePositions!: Float32Array;
@@ -50,6 +63,7 @@ export class SceneManager {
   private currentCamPos = new THREE.Vector3();
   private currentCamTarget = new THREE.Vector3();
 
+  private netHitDotMesh!: THREE.Mesh;
   private netArrowGroup!: THREE.Group;
   private landingRingMesh!: THREE.Mesh;
   private offscreenLandingHint: OffscreenLandingHint = {
@@ -62,13 +76,19 @@ export class SceneManager {
   private proceduralEnvGroup: THREE.Group | null = null;
   private readonly gltfLoader = new GLTFLoader();
 
-  constructor(container: HTMLElement, mapConfig: MapConfig) {
+  constructor(container: HTMLElement, mapConfig: MapConfig, savedConfig?: SavedCourtConfig) {
     this.mapConfig = mapConfig;
+    const initOffset = savedConfig?.courtOffset ?? mapConfig.courtOffset;
     this.courtOffset = {
-      position: [...mapConfig.courtOffset.position],
-      rotationY: mapConfig.courtOffset.rotationY,
-      scale: mapConfig.courtOffset.scale,
+      position: [...initOffset.position],
+      rotationY: initOffset.rotationY,
+      scale: initOffset.scale,
     };
+    const initCams = savedConfig?.serveCameras ?? mapConfig.serveCameras;
+    this.serveCameras = initCams.map((c) => ({
+      position: [...c.position] as [number, number, number],
+      target: [...c.target] as [number, number, number],
+    })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x9ec5e8);
@@ -78,8 +98,8 @@ export class SceneManager {
     const height = container.clientHeight || window.innerHeight;
 
     this.camera = new THREE.PerspectiveCamera(mapConfig.fov, width / height, 0.1, 150);
-    this.baseCamPos = new THREE.Vector3(...mapConfig.cameraPosition);
-    this.baseCamTarget = new THREE.Vector3(...mapConfig.cameraTarget);
+    this.baseCamPos = new THREE.Vector3(...this.serveCameras[0].position);
+    this.baseCamTarget = new THREE.Vector3(...this.serveCameras[0].target);
     this.currentCamPos.copy(this.baseCamPos);
     this.currentCamTarget.copy(this.baseCamTarget);
     this.camera.position.copy(this.baseCamPos);
@@ -107,6 +127,7 @@ export class SceneManager {
     this.orbitControls.enableDamping = true;
     this.orbitControls.dampingFactor = 0.08;
     this.orbitControls.enabled = false;
+    this.orbitControls.addEventListener('end', this.onOrbitEnd);
 
     const dom = this.renderer.domElement;
     dom.addEventListener('pointerdown', this.onNetCalPointerDown);
@@ -584,33 +605,51 @@ export class SceneManager {
   }
 
   private createNetDirectionArrow(): void {
+    // 1. Dot on the net surface showing exact impact point
+    const dotGeo = new THREE.CircleGeometry(0.06, 24);
+    const dotMat = new THREE.MeshBasicMaterial({
+      color: 0xfde047,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.netHitDotMesh = new THREE.Mesh(dotGeo, dotMat);
+    this.netHitDotMesh.rotation.x = -Math.PI / 2;
+    this.netHitDotMesh.position.set(0, OFFICIAL_NET.netHeight + 0.024, 0);
+    this.netHitDotMesh.visible = false;
+    this.scene.add(this.netHitDotMesh);
+
+    // 2. Exit arrow positioned OUTSIDE the rim pointing in the exact shoot-off direction
     const group = new THREE.Group();
-    group.position.set(0, OFFICIAL_NET.netHeight + 0.035, 0);
+    group.position.set(0, OFFICIAL_NET.netHeight + 0.03, 0);
     group.visible = false;
 
     const mat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.94,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
 
-    // Shaft pointing along +Z
-    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.34), mat);
+    const outerStart = OFFICIAL_NET.rimRadius + 0.1;
+
+    // Shaft outside the rim pointing along +Z
+    const shaft = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 0.28), mat);
     shaft.rotation.x = -Math.PI / 2;
-    shaft.position.z = 0.08;
+    shaft.position.z = outerStart + 0.14;
     group.add(shaft);
 
-    // Arrowhead cone/triangle pointing along +Z
+    // Arrowhead outside the rim pointing along +Z
     const headShape = new THREE.Shape();
-    headShape.moveTo(0, 0.16);
-    headShape.lineTo(-0.12, -0.06);
-    headShape.lineTo(0.12, -0.06);
+    headShape.moveTo(0, 0.18);
+    headShape.lineTo(-0.13, -0.04);
+    headShape.lineTo(0.13, -0.04);
     headShape.closePath();
     const head = new THREE.Mesh(new THREE.ShapeGeometry(headShape), mat);
     head.rotation.x = -Math.PI / 2;
-    head.position.z = 0.3;
+    head.position.z = outerStart + 0.34;
     group.add(head);
 
     this.netArrowGroup = group;
@@ -618,17 +657,17 @@ export class SceneManager {
   }
 
   private createLandingCircle(): void {
-    const geo = new THREE.RingGeometry(0.16, 0.25, 32);
+    const geo = new THREE.RingGeometry(0.16, 0.26, 32);
     const mat = new THREE.MeshBasicMaterial({
       color: 0xfacc15,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.9,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     const ring = new THREE.Mesh(geo, mat);
     ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.016;
+    ring.position.y = 0.018;
     ring.visible = false;
     this.landingRingMesh = ring;
     this.scene.add(ring);
@@ -638,76 +677,242 @@ export class SceneManager {
     return { ...this.offscreenLandingHint };
   }
 
+  /**
+   * Simulates the ball's forward trajectory using exact gravity, drag, and net trampoline bounce:
+   * - Always shows the ground landing circle whenever the ball is airborne in play.
+   * - Only when `isAimedAfterHit` is true AND the ball is projected to hit the net/rim:
+   *   shows a dot on the net impact spot and an exit arrow outside the rim.
+   */
   public updateBallIndicators(
     ballPos: THREE.Vector3,
     ballVel: THREE.Vector3,
-    isLive: boolean
+    isLive: boolean,
+    isAimedAfterHit: boolean
   ): void {
-    if (!isLive) {
+    if (!isLive || ballPos.y <= OFFICIAL_BALL.radius + 0.01) {
+      this.netHitDotMesh.visible = false;
       this.netArrowGroup.visible = false;
       this.landingRingMesh.visible = false;
       this.offscreenLandingHint.visible = false;
       return;
     }
 
-    const horizSpeed = Math.hypot(ballVel.x, ballVel.z);
-    if (horizSpeed > 0.35) {
-      this.netArrowGroup.visible = true;
-      this.netArrowGroup.rotation.y = Math.atan2(ballVel.x, ballVel.z);
-      const scale = THREE.MathUtils.clamp(0.75 + horizSpeed * 0.08, 0.75, 1.45);
-      this.netArrowGroup.scale.set(1, 1, scale);
+    const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
+    const netDiscRadius = OFFICIAL_NET.rimRadius + OFFICIAL_NET.rimTubeRadius * 0.5;
+    const stepDt = 0.015;
+
+    let x = ballPos.x;
+    let y = ballPos.y;
+    let z = ballPos.z;
+    let vx = ballVel.x;
+    let vy = ballVel.y;
+    let vz = ballVel.z;
+
+    let willHitNet = false;
+    let netHitX = 0;
+    let netHitZ = 0;
+    let netOutVx = 0;
+    let netOutVz = 0;
+    let landed = false;
+
+    for (let i = 0; i < 280; i++) {
+      const prevX = x;
+      const prevY = y;
+      const prevZ = z;
+      const prevVy = vy;
+
+      const spd = Math.hypot(vx, vy, vz);
+      if (spd > 0.05) {
+        const drag = 1 - Math.min(0.18, OFFICIAL_BALL.airDrag * spd * stepDt);
+        const lin = Math.exp(-OFFICIAL_BALL.linearDamping * stepDt);
+        vx *= drag * lin;
+        vy *= drag * lin;
+        vz *= drag * lin;
+      }
+      vy += OFFICIAL_BALL.gravity * stepDt;
+      x += vx * stepDt;
+      y += vy * stepDt;
+      z += vz * stepDt;
+
+      // Check downward crossing of net plane
+      if (!willHitNet && prevY >= netPlaneY && y <= netPlaneY && prevVy < -0.1) {
+        const alpha = (netPlaneY - prevY) / Math.min(-0.0001, y - prevY);
+        const hx = prevX + (x - prevX) * alpha;
+        const hz = prevZ + (z - prevZ) * alpha;
+        if (Math.hypot(hx, hz) <= netDiscRadius) {
+          willHitNet = true;
+          netHitX = hx;
+          netHitZ = hz;
+          const outVy = Math.max(2.6, Math.abs(vy) * OFFICIAL_NET.netRestitution);
+          vx *= OFFICIAL_NET.netHorizontalDamping;
+          vz *= OFFICIAL_NET.netHorizontalDamping;
+          vy = outVy;
+          netOutVx = vx;
+          netOutVz = vz;
+          x = hx;
+          y = netPlaneY + 0.015;
+          z = hz;
+          continue;
+        }
+      }
+
+      // Check ground impact
+      if (y <= OFFICIAL_BALL.radius) {
+        const alpha = (OFFICIAL_BALL.radius - prevY) / Math.min(-0.0001, y - prevY);
+        x = prevX + (x - prevX) * alpha;
+        z = prevZ + (z - prevZ) * alpha;
+        landed = true;
+        break;
+      }
+    }
+
+    // Net dot & outside-rim exit arrow ONLY after someone hits it AND it is planned to hit the net/rim
+    if (isAimedAfterHit && willHitNet) {
+      this.netHitDotMesh.position.set(netHitX, OFFICIAL_NET.netHeight + 0.025, netHitZ);
+      this.netHitDotMesh.visible = true;
+
+      const outHoriz = Math.hypot(netOutVx, netOutVz);
+      if (outHoriz > 0.25) {
+        this.netArrowGroup.rotation.y = Math.atan2(netOutVx, netOutVz);
+        const arrowScale = THREE.MathUtils.clamp(0.8 + outHoriz * 0.07, 0.8, 1.4);
+        this.netArrowGroup.scale.set(1, 1, arrowScale);
+        this.netArrowGroup.visible = true;
+      } else {
+        this.netArrowGroup.visible = false;
+      }
     } else {
+      this.netHitDotMesh.visible = false;
       this.netArrowGroup.visible = false;
     }
 
-    // Predict ground landing point (y = OFFICIAL_BALL.radius)
-    const y0 = ballPos.y;
-    const r = OFFICIAL_BALL.radius;
-    const g = OFFICIAL_BALL.gravity; // negative
-    if (y0 > r + 0.02) {
-      const a = 0.5 * g;
-      const b = ballVel.y;
-      const c = y0 - r;
-      const disc = b * b - 4 * a * c;
-      if (disc >= 0) {
-        const t = (-b - Math.sqrt(disc)) / (2 * a);
-        if (t > 0 && t < 5) {
-          const dragAtten = Math.exp(-OFFICIAL_BALL.linearDamping * t * 0.5);
-          const landX = ballPos.x + ballVel.x * t * dragAtten;
-          const landZ = ballPos.z + ballVel.z * t * dragAtten;
-          this.landingRingMesh.position.set(landX, 0.016, landZ);
-          this.landingRingMesh.visible = true;
+    // Always show ground landing spot whenever airborne
+    if (landed || y < 12) {
+      this.landingRingMesh.position.set(x, 0.018, z);
+      this.landingRingMesh.visible = true;
 
-          // Check if landing circle is off-screen
-          const proj = this.landingRingMesh.position.clone().project(this.camera);
-          const isOffscreen =
-            proj.z > 1 || Math.abs(proj.x) > 0.9 || Math.abs(proj.y) > 0.9;
-          if (isOffscreen) {
-            let nx = proj.z > 1 ? -proj.x : proj.x;
-            let ny = proj.z > 1 ? -proj.y : proj.y;
-            const maxAxis = Math.max(Math.abs(nx), Math.abs(ny), 0.001);
-            nx /= maxAxis;
-            ny /= maxAxis;
-            const pad = 42;
-            const halfW = window.innerWidth * 0.5 - pad;
-            const halfH = window.innerHeight * 0.5 - pad;
-            const sx = window.innerWidth * 0.5 + nx * halfW;
-            const sy = window.innerHeight * 0.5 - ny * halfH;
-            const angleDeg = (Math.atan2(-ny, nx) * 180) / Math.PI;
-            this.offscreenLandingHint = { visible: true, screenX: sx, screenY: sy, angleDeg };
-          } else {
-            this.offscreenLandingHint.visible = false;
-          }
-          return;
-        }
+      const proj = this.landingRingMesh.position.clone().project(this.camera);
+      const isOffscreen =
+        proj.z > 1 || Math.abs(proj.x) > 0.9 || Math.abs(proj.y) > 0.9;
+      if (isOffscreen) {
+        let nx = proj.z > 1 ? -proj.x : proj.x;
+        let ny = proj.z > 1 ? -proj.y : proj.y;
+        const maxAxis = Math.max(Math.abs(nx), Math.abs(ny), 0.001);
+        nx /= maxAxis;
+        ny /= maxAxis;
+        const pad = 42;
+        const halfW = window.innerWidth * 0.5 - pad;
+        const halfH = window.innerHeight * 0.5 - pad;
+        const sx = window.innerWidth * 0.5 + nx * halfW;
+        const sy = window.innerHeight * 0.5 - ny * halfH;
+        const angleDeg = (Math.atan2(-ny, nx) * 180) / Math.PI;
+        this.offscreenLandingHint = { visible: true, screenX: sx, screenY: sy, angleDeg };
+      } else {
+        this.offscreenLandingHint.visible = false;
       }
+    } else {
+      this.landingRingMesh.visible = false;
+      this.offscreenLandingHint.visible = false;
     }
-    this.landingRingMesh.visible = false;
-    this.offscreenLandingHint.visible = false;
+  }
+
+  public startIntroSpin(): void {
+    if (this.calibrateMode) return;
+    this.introSpinElapsed = 0;
+  }
+
+  public skipIntroSpin(): void {
+    this.introSpinElapsed = -1;
+  }
+
+  public isIntroSpinning(): boolean {
+    return this.introSpinElapsed >= 0 && this.introSpinElapsed < this.introSpinDuration;
+  }
+
+  public applySavedConfig(cfg: SavedCourtConfig): void {
+    this.setCourtOffset(cfg.courtOffset);
+    this.serveCameras = cfg.serveCameras.map((c) => ({
+      position: [...c.position] as [number, number, number],
+      target: [...c.target] as [number, number, number],
+    })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
+    const preset = this.serveCameras[this.activeServeSlot] ?? this.serveCameras[0];
+    this.baseCamPos.set(...preset.position);
+    this.baseCamTarget.set(...preset.target);
+    if (this.calibrateMode && this.calibrateTab === 'camera') {
+      const calPreset = this.serveCameras[this.calibrateServeSlot];
+      this.camera.position.set(...calPreset.position);
+      this.orbitControls.target.set(...calPreset.target);
+      this.orbitControls.update();
+    }
+  }
+
+  public setActiveServeCamera(slotIndex: number): void {
+    const idx = ((slotIndex % 4) + 4) % 4;
+    if (idx === this.activeServeSlot) return;
+    this.activeServeSlot = idx;
+    const preset = this.serveCameras[idx];
+    this.baseCamPos.set(...preset.position);
+    this.baseCamTarget.set(...preset.target);
+  }
+
+  public setCalibrateServeSlot(slotIndex: number): void {
+    // Save current slot before switching
+    if (this.calibrateMode && this.calibrateTab === 'camera') {
+      this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
+    }
+    this.calibrateServeSlot = ((slotIndex % 4) + 4) % 4;
+    const preset = this.serveCameras[this.calibrateServeSlot];
+    this.camera.position.set(...preset.position);
+    this.orbitControls.target.set(...preset.target);
+    this.camera.lookAt(this.orbitControls.target);
+    this.orbitControls.update();
+  }
+
+  public setCameraPresetChangedCallback(cb: () => void): void {
+    this.onCameraPresetChanged = cb;
+  }
+
+  private captureCurrentCameraIntoSlot(slotIndex: number): void {
+    const round = (n: number) => Math.round(n * 1000) / 1000;
+    const p = this.camera.position;
+    const t = this.orbitControls.target;
+    this.serveCameras[slotIndex] = {
+      position: [round(p.x), round(p.y), round(p.z)],
+      target: [round(t.x), round(t.y), round(t.z)],
+    };
+    if (slotIndex === this.activeServeSlot) {
+      this.baseCamPos.copy(p);
+      this.baseCamTarget.copy(t);
+    }
+  }
+
+  private onOrbitEnd = (): void => {
+    if (!this.calibrateMode || this.calibrateTab !== 'camera') return;
+    this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
+    this.onCameraPresetChanged?.();
+  };
+
+  public getSavedConfig(physicsSpeed: number): SavedCourtConfig {
+    if (this.calibrateMode && this.calibrateTab === 'camera') {
+      this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
+    }
+    const round = (n: number) => Math.round(n * 1000) / 1000;
+    return {
+      courtOffset: {
+        position: this.courtOffset.position.map(round) as [number, number, number],
+        rotationY: round(this.courtOffset.rotationY),
+        scale: round(this.courtOffset.scale),
+      },
+      serveCameras: this.serveCameras.map((c) => ({
+        position: c.position.map(round) as [number, number, number],
+        target: c.target.map(round) as [number, number, number],
+      })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset],
+      physicsSpeed: round(physicsSpeed),
+    };
   }
 
   public setCameraViewMode(mode: 'pressbox' | 'first_person'): void {
     this.cameraViewMode = mode;
+    this.skipIntroSpin();
   }
 
   public getCameraViewMode(): 'pressbox' | 'first_person' {
@@ -716,13 +921,22 @@ export class SceneManager {
 
   public setCalibrateMode(enabled: boolean): void {
     this.calibrateMode = enabled;
+    this.skipIntroSpin();
     this.netPointers.clear();
     this.netPrevPinchDist = 0;
     this.orbitControls.enabled = enabled && this.calibrateTab === 'camera';
-    if (!enabled) {
-      // Keep calibrated camera for immediate playtesting
-      this.baseCamPos.copy(this.camera.position);
-      this.baseCamTarget.copy(this.orbitControls.target);
+    if (enabled) {
+      const preset = this.serveCameras[this.calibrateServeSlot];
+      this.camera.position.set(...preset.position);
+      this.orbitControls.target.set(...preset.target);
+      this.orbitControls.update();
+    } else {
+      this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
+      const activePreset = this.serveCameras[this.activeServeSlot];
+      this.baseCamPos.set(...activePreset.position);
+      this.baseCamTarget.set(...activePreset.target);
+      this.currentCamPos.copy(this.baseCamPos);
+      this.currentCamTarget.copy(this.baseCamTarget);
       this.currentZoomFactor = 1.0;
     }
   }
@@ -874,6 +1088,27 @@ export class SceneManager {
       return;
     }
 
+    // Starting game 360° court spin animation
+    if (this.introSpinElapsed >= 0) {
+      this.introSpinElapsed += dt;
+      const t = Math.min(1, this.introSpinElapsed / this.introSpinDuration);
+      // Smooth easeInOutCubic
+      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const spinAngle = (1 - ease) * Math.PI * 2;
+      const offset = this.baseCamPos.clone().sub(this.baseCamTarget);
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), spinAngle);
+      // Slight dramatic elevation lift during the mid-spin
+      offset.y += Math.sin(t * Math.PI) * 2.2;
+      this.currentCamPos.copy(this.baseCamTarget).add(offset);
+      this.currentCamTarget.copy(this.baseCamTarget);
+      this.camera.position.copy(this.currentCamPos);
+      this.camera.lookAt(this.currentCamTarget);
+      if (t >= 1) {
+        this.introSpinElapsed = -1;
+      }
+      return;
+    }
+
     if (this.cameraViewMode === 'first_person') {
       const eyePos = new THREE.Vector3(humanPos.x, 1.68, humanPos.z);
       const netFocus = new THREE.Vector3(0, 0.35, 0);
@@ -965,6 +1200,7 @@ export class SceneManager {
     window.removeEventListener('pointerup', this.onNetCalPointerUp);
     window.removeEventListener('pointercancel', this.onNetCalPointerUp);
     dom.removeEventListener('wheel', this.onNetCalWheel);
+    this.orbitControls.removeEventListener('end', this.onOrbitEnd);
     this.orbitControls.dispose();
     this.renderer.dispose();
   }

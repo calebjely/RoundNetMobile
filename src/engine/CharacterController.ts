@@ -149,36 +149,42 @@ export class CharacterController {
         }
       });
 
-      // Normalize vertical placement so feet sit cleanly on y = 0
-      const bbox = new THREE.Box3().setFromObject(cloned);
-      if (Number.isFinite(bbox.min.y)) {
-        cloned.position.y -= bbox.min.y;
-      }
-
+      // Keep Mixamo Armature anchored cleanly at ground level y = 0
       this.root.add(cloned);
 
       if (template.animations.length > 0) {
         this.mixer = new THREE.AnimationMixer(cloned);
-        const slotNames: AnimState[] = [
-          'idle',
-          'walk',
-          'sprint',
-          'dive',
-          'get_up',
-          'block',
-          'hit_low',
-          'hit_high',
-          'spike',
-          'serve_toss',
-          'serve_hit',
-        ];
+        const clipSpeeds: Record<AnimState, number> = {
+          idle: 1.0,
+          walk: 1.25,
+          sprint: 1.35,
+          dive: 2.4,
+          get_up: 2.3,
+          block: 1.5,
+          hit_low: 2.4,
+          hit_high: 2.2,
+          spike: 2.8,
+          serve_toss: 2.2,
+          serve_hit: 2.4,
+        };
+        const slotNames = Object.keys(clipSpeeds) as AnimState[];
         for (const slot of slotNames) {
-          const clip = template.animations.find((c) => c.name.toLowerCase().includes(slot));
+          const clip =
+            template.animations.find((c) => c.name.toLowerCase() === slot) ??
+            template.animations.find((c) => c.name.toLowerCase().includes(slot));
           if (clip) {
-            this.actions.set(slot, this.mixer.clipAction(clip));
+            const action = this.mixer.clipAction(clip);
+            action.timeScale = clipSpeeds[slot];
+            this.actions.set(slot, action);
           }
         }
-        this.setAnimState('idle');
+        // Start immediately in idle pose
+        const idleAction = this.actions.get('idle');
+        if (idleAction) {
+          idleAction.play();
+          this.currentAction = idleAction;
+          this.animState = 'idle';
+        }
       } else if (bones.size > 0) {
         this.mixamoRig = { modelRoot: cloned, baseY: cloned.position.y, bones };
       }
@@ -322,15 +328,16 @@ export class CharacterController {
     const nextAction = this.actions.get(next);
     if (this.mixer && nextAction) {
       if (this.currentAction && this.currentAction !== nextAction) {
-        this.currentAction.fadeOut(0.14);
+        this.currentAction.fadeOut(0.12);
       }
-      nextAction.reset().fadeIn(0.14).play();
+      nextAction.reset();
       if (oneShotDuration > 0) {
         nextAction.setLoop(THREE.LoopOnce, 1);
         nextAction.clampWhenFinished = true;
       } else {
         nextAction.setLoop(THREE.LoopRepeat, Infinity);
       }
+      nextAction.fadeIn(0.12).play();
       this.currentAction = nextAction;
     }
   }

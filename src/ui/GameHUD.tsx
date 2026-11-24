@@ -17,13 +17,18 @@ interface GameHUDProps {
   onResetMatch: (pointsToWin: 15 | 21) => void;
   calibrateMode: boolean;
   calibrateTab: CalibratorTab;
+  calibrateServeSlot: number;
   onChangeCalibrateTab: (tab: CalibratorTab) => void;
+  onChangeCalibrateServeSlot: (slot: number) => void;
   onToggleCalibrate: () => void;
   cameraViewMode: 'pressbox' | 'first_person';
   onChangeCameraViewMode: (mode: 'pressbox' | 'first_person') => void;
   courtOffset: CourtOffsetConfig;
+  physicsSpeed: number;
   onChangeOffset: (next: CourtOffsetConfig) => void;
-  onCopyViewConfig: () => string;
+  onChangePhysicsSpeed: (speed: number) => void;
+  saveStatus: 'idle' | 'saving' | 'saved';
+  onSaveNow: () => void;
 }
 
 export const GameHUD: React.FC<GameHUDProps> = ({
@@ -37,13 +42,18 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onResetMatch,
   calibrateMode,
   calibrateTab,
+  calibrateServeSlot,
   onChangeCalibrateTab,
+  onChangeCalibrateServeSlot,
   onToggleCalibrate,
   cameraViewMode,
   onChangeCameraViewMode,
   courtOffset,
+  physicsSpeed,
   onChangeOffset,
-  onCopyViewConfig,
+  onChangePhysicsSpeed,
+  saveStatus,
+  onSaveNow,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -191,9 +201,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         visible={calibrateMode}
         activeTab={calibrateTab}
         onChangeTab={onChangeCalibrateTab}
+        serveSlot={calibrateServeSlot}
+        onChangeServeSlot={onChangeCalibrateServeSlot}
         offset={courtOffset}
+        physicsSpeed={physicsSpeed}
         onChangeOffset={onChangeOffset}
-        onCopyViewConfig={onCopyViewConfig}
+        onChangePhysicsSpeed={onChangePhysicsSpeed}
+        saveStatus={saveStatus}
+        onSaveNow={onSaveNow}
         onExit={onToggleCalibrate}
       />
     </div>
