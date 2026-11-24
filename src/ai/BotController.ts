@@ -145,7 +145,7 @@ export class BotController {
         OFFICIAL_NET.netHeight,
         (Math.random() - 0.5) * 0.26
       );
-      const flightTime = THREE.MathUtils.clamp(0.25 + distNet * 0.1, 0.24, 0.56);
+      const flightTime = THREE.MathUtils.clamp(0.18 + distNet * 0.07, 0.17, 0.38);
       const vel = computeBallisticVelocity(ballPos, target, flightTime);
       this.match.handleBotTouch(bot, vel, true);
     } else {
@@ -153,8 +153,8 @@ export class BotController {
       const setTarget = teammate
         ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.35)
         : new THREE.Vector3(0, 0, 0);
-      setTarget.y = 1.45;
-      const vel = computeBallisticVelocity(ballPos, setTarget, 0.95);
+      setTarget.y = 2.05;
+      const vel = computeBallisticVelocity(ballPos, setTarget, 1.08);
       this.match.handleBotTouch(bot, vel, false);
     }
   }

@@ -94,7 +94,7 @@ export class ShotResolver {
         OFFICIAL_NET.netHeight - 0.02,
         (Math.random() - 0.5) * timingSpread
       );
-      const flightTime = THREE.MathUtils.lerp(0.24, 0.16, Math.min(1, powerRatio * powerMod));
+      const flightTime = THREE.MathUtils.lerp(0.21, 0.14, Math.min(1, powerRatio * powerMod));
       const velocity = computeBallisticVelocity(ballPos, target, flightTime);
       return {
         velocity,
@@ -126,7 +126,7 @@ export class ShotResolver {
           OFFICIAL_NET.netHeight,
           missBias
         );
-        const flightTime = THREE.MathUtils.clamp(0.65 + distToNet * 0.14, 0.65, 1.35);
+        const flightTime = THREE.MathUtils.clamp(0.95 + distToNet * 0.16, 0.95, 1.55);
         const velocity = computeBallisticVelocity(ballPos, target, flightTime);
         return {
           velocity,
@@ -141,15 +141,15 @@ export class ShotResolver {
           ? teammate.position
               .clone()
               .lerp(new THREE.Vector3(0, 0, 0), 0.35)
-              .add(new THREE.Vector3(swipeDirX * 0.6, 1.35, 0))
+              .add(new THREE.Vector3(swipeDirX * 0.6, 2.05, 0))
           : new THREE.Vector3(
               toNet.x * 0.8 + teammateDir.x * 0.5,
-              1.35,
+              2.05,
               toNet.z * 0.8 + teammateDir.z * 0.5
             );
         setTarget.x += (Math.random() - 0.5) * timingSpread * 1.5;
         setTarget.z += (Math.random() - 0.5) * timingSpread * 1.5;
-        const velocity = computeBallisticVelocity(ballPos, setTarget, 0.92);
+        const velocity = computeBallisticVelocity(ballPos, setTarget, 1.08);
         return {
           velocity,
           timing,
@@ -168,7 +168,7 @@ export class ShotResolver {
         OFFICIAL_NET.netHeight + (powerRatio > 1.05 ? -0.03 : 0.01),
         (Math.random() - 0.5) * timingSpread
       );
-      const flightTime = THREE.MathUtils.clamp(0.32 + distToNet * 0.08, 0.26, 0.68);
+      const flightTime = THREE.MathUtils.clamp(0.22 + distToNet * 0.06, 0.18, 0.45);
       const velocity = computeBallisticVelocity(ballPos, target, flightTime);
       return {
         velocity,
@@ -183,9 +183,9 @@ export class ShotResolver {
     const passTarget = teammate
       ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.25)
       : toNet.clone().multiplyScalar(1.2);
-    passTarget.y = 1.05;
+    passTarget.y = 1.55;
     passTarget.x += swipeDirX * 0.55;
-    const velocity = computeBallisticVelocity(ballPos, passTarget, 0.66);
+    const velocity = computeBallisticVelocity(ballPos, passTarget, 0.85);
     return {
       velocity,
       timing,
@@ -246,7 +246,7 @@ export class ShotResolver {
     );
 
     // Swipe down = fast drive serve; swipe up = higher arc serve
-    const baseFlight = dirY > 0.3 ? 0.31 : dirY < -0.3 ? 0.46 : 0.37;
+    const baseFlight = dirY > 0.3 ? 0.24 : dirY < -0.3 ? 0.38 : 0.29;
     const flightTime = baseFlight / (0.9 + 0.1 * powerMod);
 
     return {

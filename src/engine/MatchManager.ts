@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TeamId } from '../config/characters';
-import { OFFICIAL_NET } from '../config/equipment';
+import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import { IRF_2026_RULES } from '../config/rules';
 import { CharacterController } from './CharacterController';
 import { PhysicsWorld } from './PhysicsWorld';
@@ -556,8 +556,8 @@ export class MatchManager {
         ).velocity;
         // Recompute cleanly from startPos -> target
         const dist = startPos.length();
-        const flight = Math.max(0.36, dist * 0.14);
-        const g = -8.35;
+        const flight = Math.max(0.24, dist * 0.095);
+        const g = OFFICIAL_BALL.gravity;
         vel.set(
           (target.x - startPos.x) / flight,
           (target.y - startPos.y - 0.5 * g * flight * flight) / flight,

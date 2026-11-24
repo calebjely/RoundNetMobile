@@ -202,7 +202,11 @@ export class PhysicsWorld {
       if (tag === 'net' && this.netHitCooldown <= 0) {
         if (ballVel.y < -0.05) {
           this.netHitCooldown = 0.12;
-          const newVy = Math.max(2.1, Math.abs(ballVel.y) * OFFICIAL_NET.netRestitution);
+          // Fast incoming shots slow horizontally off the net and pop high into a real arc
+          const newVy = Math.max(
+            3.8,
+            Math.abs(ballVel.y) * OFFICIAL_NET.netRestitution + speed * 0.22
+          );
           this.ballBody.setLinvel(
             {
               x: ballVel.x * OFFICIAL_NET.netHorizontalDamping,
