@@ -39,6 +39,7 @@ const App: React.FC = () => {
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
   const [calibrateTab, setCalibrateTab] = useState<CalibratorTab>('camera');
+  const [cameraViewMode, setCameraViewMode] = useState<'pressbox' | 'first_person'>('pressbox');
   const [courtOffset, setCourtOffset] = useState<CourtOffsetConfig>(mapConfig.courtOffset);
 
   const engineRef = useRef<{
@@ -201,7 +202,7 @@ const App: React.FC = () => {
 
         const tracked = players.map((p) => p.position);
         tracked.push(ballPos);
-        sceneMgr.updateCamera(tracked, ballPos, dt);
+        sceneMgr.updateCamera(tracked, ballPos, human.position, dt);
         sceneMgr.render();
 
         hudSyncAccum += dt;
@@ -275,6 +276,15 @@ const App: React.FC = () => {
           calibrateTab={calibrateTab}
           onChangeCalibrateTab={handleChangeCalibrateTab}
           onToggleCalibrate={handleToggleCalibrate}
+          cameraViewMode={cameraViewMode}
+          onChangeCameraViewMode={(mode) => {
+            setCameraViewMode(mode);
+            const inst = engineRef.current;
+            if (inst) {
+              inst.sceneMgr.setCameraViewMode(mode);
+              inst.human.root.visible = mode !== 'first_person';
+            }
+          }}
           courtOffset={courtOffset}
           onChangeOffset={(next) => {
             setCourtOffset(next);

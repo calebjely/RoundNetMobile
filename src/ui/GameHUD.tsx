@@ -19,6 +19,8 @@ interface GameHUDProps {
   calibrateTab: CalibratorTab;
   onChangeCalibrateTab: (tab: CalibratorTab) => void;
   onToggleCalibrate: () => void;
+  cameraViewMode: 'pressbox' | 'first_person';
+  onChangeCameraViewMode: (mode: 'pressbox' | 'first_person') => void;
   courtOffset: CourtOffsetConfig;
   onChangeOffset: (next: CourtOffsetConfig) => void;
   onCopyViewConfig: () => string;
@@ -37,6 +39,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   calibrateTab,
   onChangeCalibrateTab,
   onToggleCalibrate,
+  cameraViewMode,
+  onChangeCameraViewMode,
   courtOffset,
   onChangeOffset,
   onCopyViewConfig,
@@ -177,6 +181,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         onResetRally={onResetRally}
         onResetMatch={onResetMatch}
         pointsToWin={hud.pointsToWin}
+        cameraViewMode={cameraViewMode}
+        onChangeCameraViewMode={onChangeCameraViewMode}
         calibrateMode={calibrateMode}
         onToggleCalibrate={onToggleCalibrate}
       />

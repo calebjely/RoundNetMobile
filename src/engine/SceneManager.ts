@@ -33,6 +33,7 @@ export class SceneManager {
   private courtOffset: CourtOffsetConfig;
   private calibrateMode = false;
   private calibrateTab: 'camera' | 'net' = 'camera';
+  private cameraViewMode: 'pressbox' | 'first_person' = 'pressbox';
   private netPointers = new Map<number, { x: number; y: number }>();
   private netPrevPinchDist = 0;
   private onCourtOffsetSync?: (offset: CourtOffsetConfig) => void;
@@ -705,6 +706,14 @@ export class SceneManager {
     this.offscreenLandingHint.visible = false;
   }
 
+  public setCameraViewMode(mode: 'pressbox' | 'first_person'): void {
+    this.cameraViewMode = mode;
+  }
+
+  public getCameraViewMode(): 'pressbox' | 'first_person' {
+    return this.cameraViewMode;
+  }
+
   public setCalibrateMode(enabled: boolean): void {
     this.calibrateMode = enabled;
     this.netPointers.clear();
@@ -857,10 +866,28 @@ export class SceneManager {
   public updateCamera(
     trackedPoints: THREE.Vector3[],
     ballPos: THREE.Vector3,
+    humanPos: THREE.Vector3,
     dt: number
   ): void {
     if (this.calibrateMode) {
       this.orbitControls.update();
+      return;
+    }
+
+    if (this.cameraViewMode === 'first_person') {
+      const eyePos = new THREE.Vector3(humanPos.x, 1.68, humanPos.z);
+      const netFocus = new THREE.Vector3(0, 0.35, 0);
+      const desiredTarget = netFocus.lerp(ballPos, 0.45);
+      const lookDir = desiredTarget.clone().sub(eyePos).setY(0);
+      if (lookDir.lengthSq() > 0.001) {
+        lookDir.normalize();
+        eyePos.addScaledVector(lookDir, 0.24);
+      }
+      const fpRate = 1 - Math.exp(-dt * 10);
+      this.currentCamPos.lerp(eyePos, fpRate);
+      this.currentCamTarget.lerp(desiredTarget, fpRate);
+      this.camera.position.copy(this.currentCamPos);
+      this.camera.lookAt(this.currentCamTarget);
       return;
     }
 

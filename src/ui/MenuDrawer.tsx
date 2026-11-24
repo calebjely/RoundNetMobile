@@ -7,6 +7,8 @@ interface MenuDrawerProps {
   onResetRally: () => void;
   onResetMatch: (pointsToWin: 15 | 21) => void;
   pointsToWin: 15 | 21;
+  cameraViewMode: 'pressbox' | 'first_person';
+  onChangeCameraViewMode: (mode: 'pressbox' | 'first_person') => void;
   calibrateMode: boolean;
   onToggleCalibrate: () => void;
 }
@@ -17,6 +19,8 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
   onResetRally,
   onResetMatch,
   pointsToWin,
+  cameraViewMode,
+  onChangeCameraViewMode,
   calibrateMode,
   onToggleCalibrate,
 }) => {
@@ -71,6 +75,27 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
               onClick={() => onResetMatch(21)}
             >
               Play to 21
+            </button>
+          </div>
+
+          <div className="btn-row" style={{ marginTop: 8 }}>
+            <button
+              className={`action-btn ${cameraViewMode === 'pressbox' ? 'active' : ''}`}
+              onClick={() => {
+                onChangeCameraViewMode('pressbox');
+                onClose();
+              }}
+            >
+              Press-Box View
+            </button>
+            <button
+              className={`action-btn ${cameraViewMode === 'first_person' ? 'active' : ''}`}
+              onClick={() => {
+                onChangeCameraViewMode('first_person');
+                onClose();
+              }}
+            >
+              1st Person View
             </button>
           </div>
 
