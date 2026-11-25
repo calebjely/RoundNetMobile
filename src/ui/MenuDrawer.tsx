@@ -161,6 +161,14 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
           >
             Fullscreen (Landscape)
           </button>
+
+          <button
+            className="action-btn full"
+            style={{ marginTop: 8 }}
+            onClick={() => window.location.reload()}
+          >
+            Refresh Tab
+          </button>
         </div>
 
         <div className="drawer-section">
