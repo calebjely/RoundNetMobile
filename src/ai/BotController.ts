@@ -301,16 +301,19 @@ export class BotController {
       const vel = computeBallisticVelocity(ballPos, target, flightTime);
       this.match.handleBotTouch(bot, vel, true);
     } else {
-      // High readable set to teammate (arrives at y = 1.22 m after ~0.95 s -> peaks at ~2.35 m!)
-      const setTarget = teammate
-        ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.3)
-        : new THREE.Vector3(0, 0, 0);
-      const r = Math.hypot(setTarget.x, setTarget.z);
-      if (r < 1.35 && r > 0.01) {
-        setTarget.x = (setTarget.x / r) * 1.45;
-        setTarget.z = (setTarget.z / r) * 1.45;
-      }
-      setTarget.y = 1.22;
+      // High readable set placed between partner and rim so partner moves forward onto the net
+      const partnerPos = teammate
+        ? teammate.position
+        : new THREE.Vector3(-bot.position.x, 0, -bot.position.z);
+      const partnerDist = Math.hypot(partnerPos.x, partnerPos.z);
+      const dirX = partnerDist > 0.05 ? partnerPos.x / partnerDist : 0;
+      const dirZ = partnerDist > 0.05 ? partnerPos.z / partnerDist : 1;
+      const setRadius = THREE.MathUtils.clamp(
+        partnerDist * 0.58,
+        1.38,
+        Math.min(2.0, Math.max(1.38, partnerDist - 0.3))
+      );
+      const setTarget = new THREE.Vector3(dirX * setRadius, 1.22, dirZ * setRadius);
       const flightTime = nextTouches === 1 ? 0.94 : 0.98;
       const vel = computeBallisticVelocity(ballPos, setTarget, flightTime);
       this.match.handleBotTouch(bot, vel, false);

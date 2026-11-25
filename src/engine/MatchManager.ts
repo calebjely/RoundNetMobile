@@ -25,9 +25,17 @@ export interface TimingPopup {
   createdAt: number;
 }
 
+export interface FeedEntry {
+  id: number;
+  text: string;
+  tone: 'good' | 'warn' | 'bad' | 'info';
+  createdAt: number;
+}
+
 export interface MatchHUDState {
   scoreA: number;
   scoreB: number;
+  humanTeam: TeamId;
   pointsToWin: 15 | 21;
   servingTeam: TeamId;
   serverIndex: number;
@@ -83,6 +91,8 @@ export class MatchManager {
   private botServeDelay = 0;
   private popupCounter = 0;
   public popups: TimingPopup[] = [];
+  private feedCounter = 0;
+  public feed: FeedEntry[] = [];
 
   private readonly players: CharacterController[];
   private readonly physics: PhysicsWorld;
@@ -169,6 +179,14 @@ export class MatchManager {
     this.botServeDelay = 0.9;
     this.bannerText = null;
     this.bannerTone = 'info';
+    const humanTeam = this.players.find((p) => p.isHuman)?.team ?? 'A';
+    if (server.isHuman) {
+      this.pushFeed('Your serve — swipe up to toss', 'info');
+    } else if (server.team === humanTeam) {
+      this.pushFeed('Partner serving', 'info');
+    } else {
+      this.pushFeed('Enemy serving', 'info');
+    }
 
     this.physics.setBallState(this.getServerHandPos(server), new THREE.Vector3(0, 0, 0), false);
   }
@@ -192,6 +210,7 @@ export class MatchManager {
         this.serveMeterDir = 1;
         this.bannerText = null;
         this.bannerTone = 'info';
+        this.pushFeed('Swipe in green to serve!', 'info');
       }
       return;
     }
@@ -204,7 +223,7 @@ export class MatchManager {
       }
 
       const ballPos = this.physics.getBallPosition();
-      const { velocity } = ShotResolver.resolveServeStrike(
+      const { velocity, quality, isShank } = ShotResolver.resolveServeStrike(
         human,
         ballPos,
         swipe,
@@ -214,6 +233,10 @@ export class MatchManager {
 
       this.physics.setBallState(ballPos, velocity, true);
       human.setAnimState('serve_hit', 0.4);
+      this.pushFeed(
+        isShank ? 'Serve shank!' : `${quality} serve!`,
+        isShank ? 'warn' : quality === 'Perfect' ? 'good' : 'info'
+      );
       this.phase = 'SERVE_IN_FLIGHT';
       this.bannerText = null;
       return;
@@ -301,6 +324,25 @@ export class MatchManager {
       this.possessionTeam = human.team;
       this.teamTouches = nextTouches;
       this.lastTouchPlayerIdx = human.config.slotIndex;
+
+      const shotName =
+        outcome.shotType === 'SPIKE'
+          ? 'Spike'
+          : outcome.shotType === 'HIGH'
+            ? nextTouches <= 2
+              ? 'Set'
+              : 'Lob'
+            : 'Low Hit';
+      const tone: FeedEntry['tone'] =
+        outcome.timing === 'Bad'
+          ? 'bad'
+          : outcome.timing === 'Perfect'
+            ? 'good'
+            : 'warn';
+      this.pushFeed(
+        outcome.timing === 'Bad' ? `Bad ${shotName} (Shank)` : `${outcome.timing} ${shotName}`,
+        tone
+      );
     }
   }
 
@@ -379,6 +421,10 @@ export class MatchManager {
       this.lastTouchPlayerIdx = -1;
       this.lastAttackTeam = hittingTeam;
       this.isFirstPossessionAfterServe = false;
+      const humanTeam = this.players.find((p) => p.isHuman)?.team ?? 'A';
+      if (this.possessionTeam === humanTeam) {
+        this.pushFeed('Your ball — get under it!', 'info');
+      }
     }
   }
 
@@ -390,6 +436,7 @@ export class MatchManager {
       return;
     }
     if (this.phase === 'RALLY_LIVE') {
+      this.pushFeed('Rim Fault!', 'bad');
       // IRF rule: hitting the rim on an attack is a fault for the hitting team
       const hittingTeam = this.teamTouches > 0 ? this.possessionTeam : (this.lastAttackTeam ?? 'A');
       this.awardPoint(hittingTeam === 'A' ? 'B' : 'A', 'Rim Fault!');
@@ -458,8 +505,9 @@ export class MatchManager {
       this.serveAttempt = 2;
       this.phase = 'POINT_OVER';
       this.phaseTimer = 1.2;
-      this.bannerText = `FAULT: ${reason} — 2nd Serve`;
+      this.bannerText = null;
       this.bannerTone = 'fault';
+      this.pushFeed(`${reason} — 2nd Serve`, 'warn');
     } else {
       const receiverTeam: TeamId = this.getServingTeam() === 'A' ? 'B' : 'A';
       this.awardPoint(receiverTeam, `Double Fault (${reason})`);
@@ -471,12 +519,19 @@ export class MatchManager {
     if (winnerTeam === 'A') this.scoreA += 1;
     else this.scoreB += 1;
 
+    const humanTeam = this.players.find((p) => p.isHuman)?.team ?? 'A';
+    const wonPoint = winnerTeam === humanTeam;
+    this.pushFeed(
+      `${wonPoint ? 'Your Point!' : 'Enemy Point!'} · ${reason}`,
+      wonPoint ? 'good' : 'bad'
+    );
+
     const high = Math.max(this.scoreA, this.scoreB);
     const diff = Math.abs(this.scoreA - this.scoreB);
     if (high >= this.pointsToWin && (!IRF_2026_RULES.winByTwo || diff >= 2)) {
       this.winner = winnerTeam;
       this.phase = 'MATCH_OVER';
-      this.bannerText = `${winnerTeam === 'A' ? 'TEAM BLUE' : 'TEAM ORANGE'} WINS ${this.scoreA}–${this.scoreB}!`;
+      this.bannerText = `${wonPoint ? 'YOU WIN' : 'ENEMY WINS'} ${this.scoreA}–${this.scoreB}!`;
       this.bannerTone = 'point';
       return;
     }
@@ -494,7 +549,7 @@ export class MatchManager {
     this.serveAttempt = 1;
     this.phase = 'POINT_OVER';
     this.phaseTimer = 1.5;
-    this.bannerText = `${winnerTeam === 'A' ? 'Blue' : 'Orange'} Point! (${reason})`;
+    this.bannerText = null;
     this.bannerTone = 'point';
   }
 
@@ -504,6 +559,7 @@ export class MatchManager {
 
     const now = performance.now();
     this.popups = this.popups.filter((p) => now - p.createdAt < 900);
+    this.feed = this.feed.filter((f) => now - f.createdAt < 3400);
 
     // Physical character-to-character collisions + IRF Interference (Hinder) call
     this.resolvePlayerCollisions(ballPos);
@@ -523,7 +579,7 @@ export class MatchManager {
             new THREE.Vector3(-ballVel.x * 0.25, 5.1, -ballVel.z * 0.25),
             true
           );
-          this.spawnPopup(ballPos, 'BLOCK!', 'Perfect');
+          this.pushFeed('Block!', 'good');
         }
       }
     }
@@ -664,6 +720,23 @@ export class MatchManager {
     this.spawnPopup(worldPos.clone().add(new THREE.Vector3(0, 1.3, 0)), 'INTERFERENCE!', 'Redo');
   }
 
+  public pushFeed(text: string, tone: FeedEntry['tone'] = 'info'): void {
+    const now = performance.now();
+    const last = this.feed[0];
+    if (last && last.text === text && now - last.createdAt < 1200) {
+      return;
+    }
+    this.feed.unshift({
+      id: ++this.feedCounter,
+      text,
+      tone,
+      createdAt: now,
+    });
+    if (this.feed.length > 3) {
+      this.feed.length = 3;
+    }
+  }
+
   public showPopup(
     worldPos: THREE.Vector3,
     text: string,
@@ -704,6 +777,7 @@ export class MatchManager {
     return {
       scoreA: this.scoreA,
       scoreB: this.scoreB,
+      humanTeam: human?.team ?? 'A',
       pointsToWin: this.pointsToWin,
       servingTeam: server.team,
       serverIndex: server.config.slotIndex,

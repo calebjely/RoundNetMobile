@@ -105,7 +105,7 @@ export class SceneManager {
   private fpBlocking = false;
   private fpHints: FirstPersonHints = {
     netEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#facc15' },
-    partnerEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' },
+    partnerEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#22c55e' },
     enemyEdges: [
       { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#ef4444' },
       { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#ef4444' },
@@ -843,9 +843,10 @@ export class SceneManager {
     const behind = proj.z > 1;
     let nx = behind ? -proj.x : proj.x;
     let ny = behind ? -proj.y : proj.y;
-    const threshold = wasVisible ? 0.64 : 0.78;
-    const isOffCenter = behind || Math.abs(nx) > threshold || Math.abs(ny) > threshold;
-    if (!isOffCenter) {
+    // Only show if completely off screen
+    const threshold = wasVisible ? 0.96 : 1.03;
+    const isOffScreen = behind || Math.abs(nx) > threshold || Math.abs(ny) > threshold;
+    if (!isOffScreen) {
       return { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor };
     }
     const maxAxis = Math.max(Math.abs(nx), Math.abs(ny), 0.001);
@@ -1086,7 +1087,7 @@ export class SceneManager {
     partnerPos?: THREE.Vector3,
     enemyPositions: THREE.Vector3[] = []
   ): void {
-    if (this.cameraViewMode === 'first_person' && !this.calibrateMode) {
+    if (this.cameraViewMode !== 'pressbox' && !this.calibrateMode) {
       this.fpHints.netEdge = this.projectEdgeIndicator(
         new THREE.Vector3(0, 0.25, 0),
         '#facc15',
@@ -1095,10 +1096,10 @@ export class SceneManager {
       this.fpHints.partnerEdge = partnerPos
         ? this.projectEdgeIndicator(
             new THREE.Vector3(partnerPos.x, 1.35, partnerPos.z),
-            '#60a5fa',
+            '#22c55e',
             this.fpHints.partnerEdge.visible
           )
-        : { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' };
+        : { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#22c55e' };
       this.fpHints.enemyEdges = enemyPositions.map((pos, i) =>
         this.projectEdgeIndicator(
           new THREE.Vector3(pos.x, 1.45, pos.z),

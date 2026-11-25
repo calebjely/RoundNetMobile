@@ -6,13 +6,14 @@ import {
   IntroCameraStyle,
 } from '../config/maps';
 import { JoystickVisualState, SwipeVisualState } from '../engine/InputManager';
-import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
+import { FeedEntry, MatchHUDState, TimingPopup } from '../engine/MatchManager';
 import { FirstPersonHints, OffscreenLandingHint } from '../engine/SceneManager';
 import { CalibratorPanel, CalibratorTab } from './CalibratorPanel';
 import { MenuDrawer } from './MenuDrawer';
 
 interface GameHUDProps {
   hud: MatchHUDState;
+  feed: FeedEntry[];
   joystick: JoystickVisualState;
   popups: TimingPopup[];
   offscreenLanding: OffscreenLandingHint;
@@ -48,6 +49,7 @@ interface GameHUDProps {
 
 export const GameHUD: React.FC<GameHUDProps> = ({
   hud,
+  feed,
   joystick,
   popups,
   offscreenLanding,
@@ -82,6 +84,32 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const myScore = hud.humanTeam === 'A' ? hud.scoreA : hud.scoreB;
+  const enemyScore = hud.humanTeam === 'A' ? hud.scoreB : hud.scoreA;
+  const myServing = hud.servingTeam === hud.humanTeam;
+
+  const handleToggleFullscreen = async () => {
+    try {
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (!document.fullscreenElement) {
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+      } else {
+        await document.exitFullscreen?.();
+      }
+      const orient = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      if (orient?.lock) {
+        await orient.lock('landscape').catch(() => {});
+      }
+    } catch {
+      // ignore if browser blocks fullscreen
+    }
+  };
+
   return (
     <div className="hud-root">
       {/* Non-blocking Portrait Orientation Hint */}
@@ -89,55 +117,47 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         Rotate to Landscape for Best Controls
       </div>
 
-      {/* Top Center Scoreboard */}
-      <div className="scoreboard" data-ui-interactive="true">
-        <div className={`team-box team-a ${hud.servingTeam === 'A' ? 'serving' : ''}`}>
-          <span className="team-label">BLUE</span>
-          <span className="team-score">{hud.scoreA}</span>
+      {/* Far-Left Minimalist Scoreboard (Green = Your Team, Red = Other Team) */}
+      <div className="scoreboard-mini" data-ui-interactive="true">
+        <div className={`score-pill mine ${myServing ? 'serving' : ''}`}>
+          <span className="score-num">{myScore}</span>
         </div>
-
-        <div className="match-meta">
-          <div className="meta-row">
-            <span className="badge server-badge">
-              {hud.isHumanServing
-                ? 'YOUR SERVE'
-                : hud.servingTeam === 'A'
-                  ? 'PARTNER SERVE'
-                  : 'ENEMY SERVE'}{' '}
-              · {hud.serveAttempt === 1 ? '1st' : '2nd'}
-            </span>
-          </div>
-          <div className="meta-row">
-            {hud.phase === 'RALLY_LIVE' || hud.phase === 'SERVE_IN_FLIGHT' ? (
-              <span
-                className={`touch-counter team-ball-${hud.possessionTeam.toLowerCase()}`}
-              >
-                {hud.possessionTeam === 'A' ? 'YOUR BALL' : 'ENEMY BALL'} ·{' '}
-                {Math.min(3, hud.teamTouches + 1)}/3
-              </span>
-            ) : (
-              <span className="touch-counter">
-                {hud.isHumanServing ? 'Swipe Up to Toss' : 'Ready'}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className={`team-box team-b ${hud.servingTeam === 'B' ? 'serving' : ''}`}>
-          <span className="team-score">{hud.scoreB}</span>
-          <span className="team-label">ORANGE</span>
+        <div className={`score-pill enemy ${!myServing ? 'serving' : ''}`}>
+          <span className="score-num">{enemyScore}</span>
         </div>
       </div>
 
-      {/* Top Right Retro 3D Circular Menu Button */}
-      <button
-        data-ui-interactive="true"
-        className="menu-btn retro-circle-btn"
-        onClick={() => setMenuOpen(true)}
-        aria-label="Menu"
-      >
-        <span className="circle-btn-icon">☰</span>
-      </button>
+      {/* Top-Center Live Event & Coaching Feed */}
+      {feed.length > 0 && (
+        <div className="feed-stack" aria-live="polite">
+          {feed.map((item) => (
+            <div key={item.id} className={`feed-pill tone-${item.tone}`}>
+              {item.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Top-Right Retro 3D Buttons: Menu + Fullscreen directly underneath */}
+      <div className="top-right-stack">
+        <button
+          data-ui-interactive="true"
+          className="menu-btn retro-circle-btn"
+          onClick={() => setMenuOpen(true)}
+          aria-label="Menu"
+        >
+          <span className="circle-btn-icon">☰</span>
+        </button>
+
+        <button
+          data-ui-interactive="true"
+          className="fullscreen-btn retro-circle-btn"
+          onClick={handleToggleFullscreen}
+          aria-label="Toggle Fullscreen"
+        >
+          <span className="circle-btn-icon">⛶</span>
+        </button>
+      </div>
 
       {isHumanBlocking && (
         <div className="block-active-pill">BLOCKING</div>
@@ -191,62 +211,46 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* 1st-Person Edge Indicators: Net & Partner */}
-      {cameraViewMode === 'first_person' && fpHints.netEdge.visible && (
+      {/* Off-Screen-Only Indicators (No text): Yellow Ring = Net, Green Arrow = Your Team, Red Arrow = Enemy */}
+      {cameraViewMode !== 'pressbox' && fpHints.netEdge.visible && (
         <div
-          className="fp-edge-badge net-edge"
+          className="fp-edge-ring net-ring"
           style={{
             left: fpHints.netEdge.screenX,
             top: fpHints.netEdge.screenY,
           }}
-        >
-          <span>NET</span>
-          <span
-            className="fp-edge-arrow"
-            style={{ transform: `rotate(${fpHints.netEdge.angleDeg}deg)` }}
-          >
-            ➤
-          </span>
-        </div>
+          aria-label="Net direction"
+        />
       )}
 
-      {cameraViewMode === 'first_person' && fpHints.partnerEdge.visible && (
+      {cameraViewMode !== 'pressbox' && fpHints.partnerEdge.visible && (
         <div
-          className="fp-edge-badge partner-edge"
+          className="fp-edge-dot partner-dot"
           style={{
             left: fpHints.partnerEdge.screenX,
             top: fpHints.partnerEdge.screenY,
+            transform: `translate(-50%, -50%) rotate(${fpHints.partnerEdge.angleDeg}deg)`,
           }}
+          aria-label="Partner direction"
         >
-          <span>PARTNER</span>
-          <span
-            className="fp-edge-arrow"
-            style={{ transform: `rotate(${fpHints.partnerEdge.angleDeg}deg)` }}
-          >
-            ➤
-          </span>
+          ➤
         </div>
       )}
 
-      {/* 1st-Person Enemy Edge Trackers (compact diamond + arrow, no text names) */}
-      {cameraViewMode === 'first_person' &&
+      {cameraViewMode !== 'pressbox' &&
         fpHints.enemyEdges.map((edge, idx) =>
           edge.visible ? (
             <div
               key={idx}
-              className="fp-edge-badge enemy-edge"
+              className="fp-edge-dot enemy-dot"
               style={{
                 left: edge.screenX,
                 top: edge.screenY,
+                transform: `translate(-50%, -50%) rotate(${edge.angleDeg}deg)`,
               }}
+              aria-label="Enemy direction"
             >
-              <span>◆</span>
-              <span
-                className="fp-edge-arrow"
-                style={{ transform: `rotate(${edge.angleDeg}deg)` }}
-              >
-                ➤
-              </span>
+              ➤
             </div>
           ) : null
         )}

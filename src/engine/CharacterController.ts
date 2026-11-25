@@ -306,7 +306,7 @@ export class CharacterController {
 
     ctx.clearRect(0, 0, 128, 128);
     if (isEnemy) {
-      // High-contrast orange-red enemy chevron marker (no text)
+      // High-contrast red enemy chevron marker (no text)
       ctx.shadowColor = 'rgba(239, 68, 68, 0.85)';
       ctx.shadowBlur = 14;
       ctx.fillStyle = '#ef4444';
@@ -321,10 +321,10 @@ export class CharacterController {
       ctx.fill();
       ctx.stroke();
     } else {
-      // Subtle compact blue partner dot/chevron
-      ctx.shadowColor = 'rgba(56, 189, 248, 0.75)';
+      // Subtle compact green partner chevron (your team = always green)
+      ctx.shadowColor = 'rgba(34, 197, 94, 0.8)';
       ctx.shadowBlur = 10;
-      ctx.fillStyle = '#38bdf8';
+      ctx.fillStyle = '#22c55e';
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 6;
       ctx.beginPath();

@@ -16,7 +16,7 @@ import {
 } from './config/maps';
 import { CharacterController } from './engine/CharacterController';
 import { InputManager, JoystickVisualState, SwipeVisualState } from './engine/InputManager';
-import { MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
+import { FeedEntry, MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
 import { PhysicsWorld } from './engine/PhysicsWorld';
 import {
   FirstPersonHints,
@@ -44,6 +44,7 @@ const App: React.FC = () => {
     isSprint: false,
   });
   const [popups, setPopups] = useState<TimingPopup[]>([]);
+  const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [offscreenLanding, setOffscreenLanding] = useState<OffscreenLandingHint>({
     visible: false,
     screenX: 0,
@@ -128,6 +129,23 @@ const App: React.FC = () => {
   useEffect(() => {
     const container = hostRef.current;
     if (!container) return;
+
+    // Try auto-entering fullscreen/landscape if allowed by browser/PWA context
+    try {
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (!document.fullscreenElement) {
+        if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen().catch(() => {});
+      }
+      const orient = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      orient?.lock?.('landscape')?.catch(() => {});
+    } catch {
+      // ignore when browser requires explicit user gesture
+    }
 
     let disposed = false;
     let rafId = 0;
@@ -450,6 +468,7 @@ const App: React.FC = () => {
         if (hudSyncAccum >= 0.033) {
           hudSyncAccum = 0;
           setHud(matchMgr.getHUDState());
+          setFeed([...matchMgr.feed]);
           setJoystick({ ...inputMgr.joystickState });
           setPopups([...matchMgr.popups]);
           setOffscreenLanding(sceneMgr.getOffscreenLandingHint());
@@ -526,6 +545,7 @@ const App: React.FC = () => {
       {hud && (
         <GameHUD
           hud={hud}
+          feed={feed}
           joystick={joystick}
           popups={popups}
           offscreenLanding={offscreenLanding}

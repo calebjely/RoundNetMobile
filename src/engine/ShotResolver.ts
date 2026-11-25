@@ -266,15 +266,20 @@ export class ShotResolver {
     // 1. HIGH HIT / SET (90-degree upward cone: +-45 deg around UP)
     if (shotType === 'HIGH') {
       if (teamTouchesAfterThis <= 2) {
-        const setTarget = teammate
-          ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.34)
-          : new THREE.Vector3(-player.position.x * 0.25, 0, -player.position.z * 0.25);
-        const r = Math.hypot(setTarget.x, setTarget.z);
-        if (r < 1.38 && r > 0.01) {
-          setTarget.x = (setTarget.x / r) * 1.48;
-          setTarget.z = (setTarget.z / r) * 1.48;
-        }
-        setTarget.addScaledVector(rightHoriz, swipeDirX * 0.65);
+        const partnerPos = teammate
+          ? teammate.position
+          : new THREE.Vector3(-player.position.x, 0, -player.position.z);
+        const partnerDist = Math.hypot(partnerPos.x, partnerPos.z);
+        const dirX = partnerDist > 0.05 ? partnerPos.x / partnerDist : 0;
+        const dirZ = partnerDist > 0.05 ? partnerPos.z / partnerDist : 1;
+        // Always place set between partner and rim (1.38 m .. 2.05 m from net) so partner runs forward!
+        const setRadius = THREE.MathUtils.clamp(
+          partnerDist * 0.58,
+          1.38,
+          Math.min(2.05, Math.max(1.38, partnerDist - 0.3))
+        );
+        const setTarget = new THREE.Vector3(dirX * setRadius, 0, dirZ * setRadius);
+        setTarget.addScaledVector(rightHoriz, swipeDirX * 0.55);
         setTarget.x += randScatterX;
         setTarget.z += randScatterZ;
         setTarget.y = zone === 'red' ? 0.88 : 1.24;
