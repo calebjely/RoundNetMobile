@@ -422,9 +422,11 @@ export class SceneManager {
     const normalMap = this.createBallPipNormalMap();
     const mat = new THREE.MeshStandardMaterial({
       color: OFFICIAL_BALL.colorHex,
+      emissive: 0xfacc15,
+      emissiveIntensity: 0.24,
       normalMap,
       normalScale: new THREE.Vector2(0.75, 0.75),
-      roughness: 0.42,
+      roughness: 0.36,
       metalness: 0.04,
     });
 
@@ -681,12 +683,12 @@ export class SceneManager {
     this.scene.add(ring);
 
     // Dynamic inner height-indicator circle:
-    // Smaller when ball is high; grows larger as ball drops; FULL circle (0.64 m) at hitting height!
+    // Same color as outside ring; smaller when ball is high, grows larger closer to ground, FULL (0.64 m) at hitting height!
     const innerGeo = new THREE.CircleGeometry(0.64, 36);
     this.landingInnerMat = new THREE.MeshBasicMaterial({
       color: 0x3b82f6,
       transparent: true,
-      opacity: 0.32,
+      opacity: 0.65,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -820,21 +822,21 @@ export class SceneManager {
       this.landingRingMesh.position.set(x, 0.018, z);
       this.landingRingMesh.visible = true;
 
-      // Dynamic inner circle: small when high (> 1.95 m), grows larger closer to ground, FULL (1.0) at hitting height!
-      const hitHeight = 1.95;
+      // Dynamic inner circle: small when high (> 1.98 m), grows larger closer to ground, FULL (1.0) at hitting height!
+      const hitHeight = 1.98;
       const maxHeight = 4.2;
       let innerScale: number;
       if (ballPos.y <= hitHeight) {
         innerScale = 1.0;
-        this.landingInnerMat.opacity = 0.46;
+        this.landingInnerMat.opacity = 0.78;
       } else {
         const heightNorm = THREE.MathUtils.clamp(
           (ballPos.y - hitHeight) / (maxHeight - hitHeight),
           0,
           1
         );
-        innerScale = THREE.MathUtils.lerp(0.86, 0.16, heightNorm);
-        this.landingInnerMat.opacity = 0.24;
+        innerScale = THREE.MathUtils.lerp(0.86, 0.18, heightNorm);
+        this.landingInnerMat.opacity = 0.62;
       }
       this.landingInnerMesh.position.set(x, 0.017, z);
       this.landingInnerMesh.scale.setScalar(innerScale);
@@ -961,7 +963,7 @@ export class SceneManager {
     this.onCameraPresetChanged?.();
   };
 
-  public getSavedConfig(physicsSpeed: number): SavedCourtConfig {
+  public getSavedConfig(physicsSpeed: number, playerSpeed: number): SavedCourtConfig {
     if (this.calibrateMode && this.calibrateTab === 'camera') {
       this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
     }
@@ -977,6 +979,7 @@ export class SceneManager {
         target: c.target.map(round) as [number, number, number],
       })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset],
       physicsSpeed: round(physicsSpeed),
+      playerSpeed: round(playerSpeed),
       introCameraStyle: this.introStyle,
     };
   }

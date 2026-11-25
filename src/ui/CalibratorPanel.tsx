@@ -11,8 +11,10 @@ interface CalibratorPanelProps {
   onChangeServeSlot: (slot: number) => void;
   offset: CourtOffsetConfig;
   physicsSpeed: number;
+  playerSpeed: number;
   onChangeOffset: (next: CourtOffsetConfig) => void;
   onChangePhysicsSpeed: (speed: number) => void;
+  onChangePlayerSpeed: (speed: number) => void;
   saveStatus: 'idle' | 'saving' | 'saved';
   onSaveNow: () => void;
   onExit: () => void;
@@ -33,8 +35,10 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
   onChangeServeSlot,
   offset,
   physicsSpeed,
+  playerSpeed,
   onChangeOffset,
   onChangePhysicsSpeed,
+  onChangePlayerSpeed,
   saveStatus,
   onSaveNow,
   onExit,
@@ -103,7 +107,21 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
                 value={physicsSpeed}
                 onChange={(e) => onChangePhysicsSpeed(parseFloat(e.target.value))}
               />
-              <span className="v-slider-lbl">Speed</span>
+              <span className="v-slider-lbl">Ball</span>
+            </div>
+
+            <div className="v-slider-col">
+              <span className="v-slider-val">{playerSpeed.toFixed(2)}x</span>
+              <input
+                className="v-slider"
+                type="range"
+                min={0.5}
+                max={1.5}
+                step={0.05}
+                value={playerSpeed}
+                onChange={(e) => onChangePlayerSpeed(parseFloat(e.target.value))}
+              />
+              <span className="v-slider-lbl">Player</span>
             </div>
           </div>
         </>
@@ -156,7 +174,21 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
                 value={physicsSpeed}
                 onChange={(e) => onChangePhysicsSpeed(parseFloat(e.target.value))}
               />
-              <span className="v-slider-lbl">Speed</span>
+              <span className="v-slider-lbl">Ball</span>
+            </div>
+
+            <div className="v-slider-col">
+              <span className="v-slider-val">{playerSpeed.toFixed(2)}x</span>
+              <input
+                className="v-slider"
+                type="range"
+                min={0.5}
+                max={1.5}
+                step={0.05}
+                value={playerSpeed}
+                onChange={(e) => onChangePlayerSpeed(parseFloat(e.target.value))}
+              />
+              <span className="v-slider-lbl">Player</span>
             </div>
           </div>
         </>

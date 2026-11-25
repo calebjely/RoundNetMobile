@@ -404,7 +404,8 @@ export class CharacterController {
     dt: number,
     moveInput: THREE.Vector2,
     deflection: number,
-    restrictToQuarterSlice = false
+    restrictToQuarterSlice = false,
+    playerSpeedMult = 1.0
   ): void {
     this.animClock += dt;
     this.nhzFollowThroughTimer = Math.max(0, this.nhzFollowThroughTimer - dt);
@@ -462,7 +463,7 @@ export class CharacterController {
           this.stamina = Math.min(maxStam, this.stamina + MOVEMENT_TUNING.staminaRegenPerSec * 0.65 * dt);
         }
 
-        targetSpeed *= speedStat;
+        targetSpeed *= speedStat * playerSpeedMult;
         const nx = moveInput.x / mag;
         const nz = moveInput.y / mag;
         this.velocity.x = THREE.MathUtils.lerp(this.velocity.x, nx * targetSpeed, 1 - Math.exp(-dt * 14));
@@ -493,7 +494,7 @@ export class CharacterController {
 
     this.position.addScaledVector(this.velocity, dt);
 
-    // Keep player outside physical net rim cylinder (0.48 m) and inside outer playable fence (9.6 m)
+    // Keep player outside physical net rim cylinder (0.48 m); no outer boundary clamp during live play!
     let distFromCenter = Math.hypot(this.position.x, this.position.z);
     const minRadius = restrictToQuarterSlice ? IRF_2026_RULES.serviceLineRadius + 0.05 : 0.56;
     if (distFromCenter < minRadius && distFromCenter > 0.001) {
@@ -502,12 +503,11 @@ export class CharacterController {
       this.position.z *= push;
       distFromCenter = minRadius;
     }
-    const maxBounds = restrictToQuarterSlice ? IRF_2026_RULES.outerBoundaryRadius : 9.5;
-    if (distFromCenter > maxBounds) {
-      const clamp = maxBounds / distFromCenter;
+    if (restrictToQuarterSlice && distFromCenter > IRF_2026_RULES.outerBoundaryRadius) {
+      const clamp = IRF_2026_RULES.outerBoundaryRadius / distFromCenter;
       this.position.x *= clamp;
       this.position.z *= clamp;
-      distFromCenter = maxBounds;
+      distFromCenter = IRF_2026_RULES.outerBoundaryRadius;
     }
 
     // Clamp to 90° quarter ("pizza slice") before the serve is struck

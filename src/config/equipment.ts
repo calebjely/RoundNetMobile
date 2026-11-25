@@ -41,7 +41,7 @@ export const OFFICIAL_BALL: BallSpec = {
   diameter: 0.105,
   radius: 0.0525,
   massKg: 0.085,
-  colorHex: 0xfacc15,
+  colorHex: 0xfde047,
   customTextureUrl: undefined,
   gravity: -9.81,
   airDrag: 0.015,

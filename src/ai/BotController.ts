@@ -26,7 +26,7 @@ export class BotController {
     this.match = match;
   }
 
-  public update(dt: number): void {
+  public update(dt: number, playerSpeedMult = 1.0): void {
     this.globalTouchCooldown = Math.max(0, this.globalTouchCooldown - dt);
     if (
       this.match.possessionTeam !== this.prevPossessionTeam ||
@@ -148,15 +148,16 @@ export class BotController {
           if (moveIntent.lengthSq() > 0.01) moveIntent.normalize();
           deflection = moveIntent.length() > 0.1 ? 0.54 : 0;
         }
-      } else {
-        // Hold quarter starting position before serve rebounds off net
+      } else if (phase === 'SERVE_WAIT_TOSS' || phase === 'SERVE_METER_ACTIVE') {
+        // Hold quarter starting position before serve
         this.moveToStartSpot(bot, moveIntent, 0.22);
         deflection = moveIntent.length() > 0.1 ? 0.45 : 0;
       }
+      // During POINT_OVER / REDO_BANNER / MATCH_OVER, bots stay where they finished the play!
 
       const isPreServe =
         phase === 'SERVE_WAIT_TOSS' || phase === 'SERVE_METER_ACTIVE';
-      bot.update(dt, moveIntent, deflection, isPreServe);
+      bot.update(dt, moveIntent, deflection, isPreServe, playerSpeedMult);
     }
   }
 

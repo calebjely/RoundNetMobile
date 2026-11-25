@@ -17,6 +17,8 @@ export interface SavedCourtConfig {
   serveCameras: [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
   /** Physics time scale multiplier (0.6 – 2.0, default 1.25) */
   physicsSpeed: number;
+  /** Player movement speed multiplier (0.5 – 1.5, default 0.82) */
+  playerSpeed: number;
   /** Start screen / match-reset camera intro movement */
   introCameraStyle: IntroCameraStyle;
 }
@@ -33,6 +35,7 @@ export interface MapConfig {
   fov: number;
   maxZoomOutFactor: number;
   defaultPhysicsSpeed: number;
+  defaultPlayerSpeed: number;
 }
 
 function rotateXZ(
@@ -73,6 +76,7 @@ export const MAPS: Record<string, MapConfig> = {
     fov: 46,
     maxZoomOutFactor: 2.25,
     defaultPhysicsSpeed: 1.25,
+    defaultPlayerSpeed: 0.82,
   },
 };
 
@@ -92,6 +96,7 @@ export function getDefaultSavedConfig(map: MapConfig): SavedCourtConfig {
       target: [...c.target] as [number, number, number],
     })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset],
     physicsSpeed: map.defaultPhysicsSpeed,
+    playerSpeed: map.defaultPlayerSpeed,
     introCameraStyle: 'swoop90',
   };
 }
@@ -169,6 +174,12 @@ function mergeSavedConfig(
       parsed.physicsSpeed <= 2.5
         ? parsed.physicsSpeed
         : fallback.physicsSpeed,
+    playerSpeed:
+      typeof parsed.playerSpeed === 'number' &&
+      parsed.playerSpeed >= 0.4 &&
+      parsed.playerSpeed <= 1.8
+        ? parsed.playerSpeed
+        : fallback.playerSpeed,
     introCameraStyle:
       parsed.introCameraStyle === 'swoop90' ||
       parsed.introCameraStyle === 'wide_zoom_tilt' ||

@@ -11,6 +11,7 @@ interface GameHUDProps {
   joystick: JoystickVisualState;
   popups: TimingPopup[];
   offscreenLanding: OffscreenLandingHint;
+  isHumanBlocking: boolean;
   returnToNetActive: boolean;
   onReturnToNetPress: (active: boolean) => void;
   onResetRally: () => void;
@@ -27,8 +28,10 @@ interface GameHUDProps {
   onChangeIntroStyle: (style: IntroCameraStyle) => void;
   courtOffset: CourtOffsetConfig;
   physicsSpeed: number;
+  playerSpeed: number;
   onChangeOffset: (next: CourtOffsetConfig) => void;
   onChangePhysicsSpeed: (speed: number) => void;
+  onChangePlayerSpeed: (speed: number) => void;
   saveStatus: 'idle' | 'saving' | 'saved';
   onSaveNow: () => void;
 }
@@ -38,6 +41,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   joystick,
   popups,
   offscreenLanding,
+  isHumanBlocking,
   returnToNetActive,
   onReturnToNetPress,
   onResetRally,
@@ -54,8 +58,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onChangeIntroStyle,
   courtOffset,
   physicsSpeed,
+  playerSpeed,
   onChangeOffset,
   onChangePhysicsSpeed,
+  onChangePlayerSpeed,
   saveStatus,
   onSaveNow,
 }) => {
@@ -104,15 +110,19 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       </div>
 
-      {/* Top Right Circular Gaming Menu Button */}
+      {/* Top Right Retro 3D Circular Menu Button */}
       <button
         data-ui-interactive="true"
-        className="menu-btn game-circle-btn"
+        className="menu-btn retro-circle-btn"
         onClick={() => setMenuOpen(true)}
         aria-label="Menu"
       >
         <span className="circle-btn-icon">☰</span>
       </button>
+
+      {isHumanBlocking && (
+        <div className="block-active-pill">BLOCKING</div>
+      )}
 
       {/* Center Event Banner (Point, Fault, REDO) */}
       {hud.bannerText && (
@@ -162,35 +172,31 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Bottom-Left Circular Gaming Button: Return to Net */}
+      {/* Bottom-Left Persistent 3D Arcade Cluster: Unlabeled Retro Net Button + Persistent 3D Cupped Joystick */}
       <div className="bottom-left-cluster">
         <button
           data-ui-interactive="true"
-          className={`return-net-btn game-circle-btn ${returnToNetActive ? 'active' : ''}`}
+          className={`return-net-btn retro-circle-btn ${returnToNetActive ? 'active' : ''}`}
           onPointerDown={() => onReturnToNetPress(true)}
           onPointerUp={() => onReturnToNetPress(false)}
           onPointerCancel={() => onReturnToNetPress(false)}
+          aria-label="Move to net"
         >
           <span className="circle-btn-icon">◎</span>
-          <span className="circle-btn-label">NET</span>
         </button>
-      </div>
 
-      {/* Progressive Dual-Ring Virtual Joystick Visual */}
-      {joystick.active && (
-        <div
-          className="joystick-base"
-          style={{ left: joystick.originX, top: joystick.originY }}
-        >
+        <div id="persistent-joystick-base" className="joystick-base-3d">
           <div className="joystick-walk-ring" />
           <div
-            className={`joystick-thumb ${joystick.isSprint ? 'sprint' : ''}`}
+            className={`joystick-thumb-3d ${joystick.isSprint ? 'sprint' : ''}`}
             style={{
-              transform: `translate(${joystick.thumbX - joystick.originX}px, ${joystick.thumbY - joystick.originY}px)`,
+              transform: joystick.active
+                ? `translate(${joystick.thumbX - joystick.originX}px, ${joystick.thumbY - joystick.originY}px)`
+                : 'translate(0px, 0px)',
             }}
           />
         </div>
-      )}
+      </div>
 
       {/* Subtle Touch Hint on Bottom Right */}
       <div className="right-zone-hint">
@@ -219,8 +225,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         onChangeServeSlot={onChangeCalibrateServeSlot}
         offset={courtOffset}
         physicsSpeed={physicsSpeed}
+        playerSpeed={playerSpeed}
         onChangeOffset={onChangeOffset}
         onChangePhysicsSpeed={onChangePhysicsSpeed}
+        onChangePlayerSpeed={onChangePlayerSpeed}
         saveStatus={saveStatus}
         onSaveNow={onSaveNow}
         onExit={onToggleCalibrate}

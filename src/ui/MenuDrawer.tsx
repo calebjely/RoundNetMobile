@@ -38,6 +38,29 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
 }) => {
   if (!open) return null;
 
+  const handleFullscreenLandscape = async () => {
+    try {
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (!document.fullscreenElement) {
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+      } else {
+        await document.exitFullscreen?.();
+      }
+      const orient = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      if (orient?.lock) {
+        await orient.lock('landscape').catch(() => {});
+      }
+    } catch {
+      // ignore if unsupported on iOS Safari
+    }
+    onClose();
+  };
+
   return (
     <div
       data-ui-interactive="true"
@@ -120,6 +143,14 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
             }}
           >
             {calibrateMode ? 'Exit Scene Calibrator (F2)' : 'Toggle Scene Calibrator (F2)'}
+          </button>
+
+          <button
+            className="action-btn primary full"
+            style={{ marginTop: 8 }}
+            onClick={handleFullscreenLandscape}
+          >
+            Fullscreen (Landscape)
           </button>
         </div>
 

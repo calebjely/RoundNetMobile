@@ -58,9 +58,12 @@ const App: React.FC = () => {
     initialSaved.current.courtOffset
   );
   const [physicsSpeed, setPhysicsSpeed] = useState<number>(initialSaved.current.physicsSpeed);
+  const [playerSpeed, setPlayerSpeed] = useState<number>(initialSaved.current.playerSpeed);
+  const [isHumanBlocking, setIsHumanBlocking] = useState<boolean>(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const physicsSpeedRef = useRef<number>(initialSaved.current.physicsSpeed);
+  const playerSpeedRef = useRef<number>(initialSaved.current.playerSpeed);
   const saveTimerRef = useRef<number | null>(null);
 
   const engineRef = useRef<{
@@ -75,7 +78,10 @@ const App: React.FC = () => {
     const inst = engineRef.current;
     if (!inst) return;
     setSaveStatus('saving');
-    const cfg = inst.sceneMgr.getSavedConfig(physicsSpeedRef.current);
+    const cfg = inst.sceneMgr.getSavedConfig(
+      physicsSpeedRef.current,
+      playerSpeedRef.current
+    );
     await persistCourtConfig(cfg);
     setSaveStatus('saved');
     window.setTimeout(() => setSaveStatus('idle'), 1500);
@@ -131,8 +137,10 @@ const App: React.FC = () => {
         sceneMgr.applySavedConfig(remote);
         setCourtOffset(remote.courtOffset);
         setPhysicsSpeed(remote.physicsSpeed);
+        setPlayerSpeed(remote.playerSpeed);
         setIntroStyle(remote.introCameraStyle);
         physicsSpeedRef.current = remote.physicsSpeed;
+        playerSpeedRef.current = remote.playerSpeed;
       });
 
       await physics.init({
@@ -246,11 +254,23 @@ const App: React.FC = () => {
           const worldZ = camRight.z * dir.x + camForward.z * -dir.y;
           dir.set(worldX, worldZ).normalize();
         }
+        const isPreServe =
+          matchMgr.phase === 'SERVE_WAIT_TOSS' || matchMgr.phase === 'SERVE_METER_ACTIVE';
+
         if (engineRef.current?.returnToNet && deflection < 0.05) {
-          const target = new THREE.Vector3(0, 0, 2.5);
+          // Pre-serve -> move up to the ~6 ft service line (2.66 m);
+          // After serve / live play -> sprint all the way up to the net (0.68 m)!
+          const curR = Math.hypot(human.position.x, human.position.z);
+          const curAngle = curR > 0.01 ? Math.atan2(human.position.x, human.position.z) : 0;
+          const desiredRadius = isPreServe ? 2.66 : 0.68;
+          const target = new THREE.Vector3(
+            Math.sin(curAngle) * desiredRadius,
+            0,
+            Math.cos(curAngle) * desiredRadius
+          );
           const toTarget = target.sub(human.position);
           const dist = Math.hypot(toTarget.x, toTarget.z);
-          if (dist > 0.25) {
+          if (dist > 0.16) {
             dir.set(toTarget.x / dist, toTarget.z / dist);
             deflection = 0.92;
           } else {
@@ -259,10 +279,9 @@ const App: React.FC = () => {
           }
         }
 
-        const isPreServe =
-          matchMgr.phase === 'SERVE_WAIT_TOSS' || matchMgr.phase === 'SERVE_METER_ACTIVE';
-        human.update(simDt, dir, deflection, isPreServe);
-        bots.update(simDt);
+        const plrSpd = playerSpeedRef.current;
+        human.update(simDt, dir, deflection, isPreServe, plrSpd);
+        bots.update(simDt, plrSpd);
 
         // Fixed-timestep physics accumulator so mobile 30fps runs at true 1.0x+ normal speed!
         physicsAccum += Math.min(simDt, 0.1);
@@ -321,6 +340,7 @@ const App: React.FC = () => {
           setJoystick({ ...inputMgr.joystickState });
           setPopups([...matchMgr.popups]);
           setOffscreenLanding(sceneMgr.getOffscreenLandingHint());
+          setIsHumanBlocking(human.isBlocking);
         }
 
         rafId = requestAnimationFrame(tick);
@@ -382,6 +402,7 @@ const App: React.FC = () => {
           joystick={joystick}
           popups={popups}
           offscreenLanding={offscreenLanding}
+          isHumanBlocking={isHumanBlocking}
           returnToNetActive={returnToNetActive}
           onReturnToNetPress={(active) => {
             if (engineRef.current) {
@@ -421,6 +442,7 @@ const App: React.FC = () => {
           }}
           courtOffset={courtOffset}
           physicsSpeed={physicsSpeed}
+          playerSpeed={playerSpeed}
           onChangeOffset={(next) => {
             setCourtOffset(next);
             engineRef.current?.sceneMgr.setCourtOffset(next);
@@ -429,6 +451,11 @@ const App: React.FC = () => {
           onChangePhysicsSpeed={(spd) => {
             setPhysicsSpeed(spd);
             physicsSpeedRef.current = spd;
+            scheduleAutoSave();
+          }}
+          onChangePlayerSpeed={(spd) => {
+            setPlayerSpeed(spd);
+            playerSpeedRef.current = spd;
             scheduleAutoSave();
           }}
           saveStatus={saveStatus}

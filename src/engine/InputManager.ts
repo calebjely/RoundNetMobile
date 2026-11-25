@@ -81,16 +81,29 @@ export class InputManager {
     if (e.clientX < halfW && this.leftPointerId === null) {
       this.leftPointerId = e.pointerId;
       this.callbacks.onReturnToNetCancel();
+      // If user touches inside the persistent bottom-left joystick area, anchor to it; otherwise dynamic origin
+      const persistEl = document.getElementById('persistent-joystick-base');
+      let ox = e.clientX;
+      let oy = e.clientY;
+      if (persistEl) {
+        const rect = persistEl.getBoundingClientRect();
+        const cx = rect.left + rect.width * 0.5;
+        const cy = rect.top + rect.height * 0.5;
+        if (Math.hypot(e.clientX - cx, e.clientY - cy) <= this.maxRadiusPx * 1.45) {
+          ox = cx;
+          oy = cy;
+        }
+      }
       this.joystickState = {
         active: true,
-        originX: e.clientX,
-        originY: e.clientY,
+        originX: ox,
+        originY: oy,
         thumbX: e.clientX,
         thumbY: e.clientY,
         deflection: 0,
         isSprint: false,
       };
-      this.moveVector.set(0, 0);
+      this.updateLeftThumb(e.clientX, e.clientY);
     } else if (e.clientX >= halfW && this.rightPointerId === null) {
       this.rightPointerId = e.pointerId;
       this.rightStartX = e.clientX;
@@ -98,42 +111,42 @@ export class InputManager {
       this.rightStartTime = performance.now();
       this.rightMaxDist = 0;
 
-      // Tap & Hold to Block after 190ms if finger hasn't swiped far
+      // Tap & Hold to Block after 130ms if finger hasn't swiped far
       this.blockHoldTimer = window.setTimeout(() => {
-        if (this.rightPointerId !== null && this.rightMaxDist < 18) {
+        if (this.rightPointerId !== null && this.rightMaxDist < 28) {
           this.isHoldingBlock = true;
           this.callbacks.onBlockStart();
         }
-      }, 190);
+      }, 130);
     }
   };
 
+  private updateLeftThumb(clientX: number, clientY: number): void {
+    const dx = clientX - this.joystickState.originX;
+    const dy = clientY - this.joystickState.originY;
+    const dist = Math.hypot(dx, dy);
+    const clamped = Math.min(dist, this.maxRadiusPx);
+    const angle = Math.atan2(dy, dx);
+
+    this.joystickState.thumbX = this.joystickState.originX + Math.cos(angle) * clamped;
+    this.joystickState.thumbY = this.joystickState.originY + Math.sin(angle) * clamped;
+    this.joystickState.deflection = clamped / this.maxRadiusPx;
+    this.joystickState.isSprint = this.joystickState.deflection > 0.55;
+
+    if (dist > 4) {
+      this.moveVector.set(Math.cos(angle), Math.sin(angle));
+    } else {
+      this.moveVector.set(0, 0);
+    }
+  }
+
   private onPointerMove = (e: PointerEvent): void => {
     if (e.pointerId === this.leftPointerId) {
-      const dx = e.clientX - this.joystickState.originX;
-      const dy = e.clientY - this.joystickState.originY;
-      const dist = Math.hypot(dx, dy);
-      const clamped = Math.min(dist, this.maxRadiusPx);
-      const angle = Math.atan2(dy, dx);
-
-      const thumbX = this.joystickState.originX + Math.cos(angle) * clamped;
-      const thumbY = this.joystickState.originY + Math.sin(angle) * clamped;
-      const deflection = clamped / this.maxRadiusPx;
-
-      this.joystickState.thumbX = thumbX;
-      this.joystickState.thumbY = thumbY;
-      this.joystickState.deflection = deflection;
-      this.joystickState.isSprint = deflection > 0.55;
-
-      if (dist > 4) {
-        this.moveVector.set(Math.cos(angle), Math.sin(angle));
-      } else {
-        this.moveVector.set(0, 0);
-      }
+      this.updateLeftThumb(e.clientX, e.clientY);
     } else if (e.pointerId === this.rightPointerId) {
       const dist = Math.hypot(e.clientX - this.rightStartX, e.clientY - this.rightStartY);
       this.rightMaxDist = Math.max(this.rightMaxDist, dist);
-      if (this.rightMaxDist > 22 && this.isHoldingBlock) {
+      if (this.rightMaxDist > 30 && this.isHoldingBlock) {
         this.isHoldingBlock = false;
         this.callbacks.onBlockEnd();
       }
