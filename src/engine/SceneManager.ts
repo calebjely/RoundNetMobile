@@ -159,6 +159,8 @@ export class SceneManager {
   };
 
   private proceduralEnvGroup: THREE.Group | null = null;
+  private hiddenFollowObstacles: THREE.Object3D[] = [];
+  private readonly followRaycaster = new THREE.Raycaster();
   private readonly gltfLoader = new GLTFLoader();
 
   constructor(container: HTMLElement, mapConfig: MapConfig, savedConfig?: SavedCourtConfig) {
@@ -1519,8 +1521,18 @@ export class SceneManager {
     humanPos: THREE.Vector3,
     dt: number
   ): void {
+    // Restore any procedural obstacles hidden on previous frame
+    for (const obj of this.hiddenFollowObstacles) {
+      obj.visible = true;
+    }
+    this.hiddenFollowObstacles.length = 0;
+
     if (this.calibrateMode) {
       if (this.calibrateTab === 'net' || this.cameraViewMode === 'pressbox') {
+        if (Math.abs(this.camera.near - 0.1) > 0.005) {
+          this.camera.near = 0.1;
+          this.camera.updateProjectionMatrix();
+        }
         this.orbitControls.update();
         return;
       }
@@ -1529,6 +1541,10 @@ export class SceneManager {
 
     // Starting game cinematic camera intro animation
     if (this.introSpinElapsed >= 0) {
+      if (Math.abs(this.camera.near - 0.1) > 0.005) {
+        this.camera.near = 0.1;
+        this.camera.updateProjectionMatrix();
+      }
       this.introSpinElapsed += dt;
       const t = Math.min(1, this.introSpinElapsed / this.introSpinDuration);
       // Smooth quintic ease-in-out for natural, non-dizzy motion
@@ -1659,7 +1675,37 @@ export class SceneManager {
       this.currentCamTarget.copy(this.fpEyePos).add(lookDir);
       this.camera.position.copy(this.currentCamPos);
       this.camera.lookAt(this.currentCamTarget);
+
+      // Clip out any Gaussian Splat trees/bushes or procedural obstacles between camera and player
+      const playerChest = new THREE.Vector3(humanPos.x, 1.15, humanPos.z);
+      const camToPlayerDist = this.currentCamPos.distanceTo(playerChest);
+      const desiredNear = THREE.MathUtils.clamp(
+        camToPlayerDist - 0.65,
+        0.1,
+        Math.max(0.15, camToPlayerDist - 0.45)
+      );
+      if (Math.abs(this.camera.near - desiredNear) > 0.02) {
+        this.camera.near = desiredNear;
+        this.camera.updateProjectionMatrix();
+      }
+      if (this.proceduralEnvGroup) {
+        const rayDir = playerChest.clone().sub(this.currentCamPos).normalize();
+        this.followRaycaster.set(this.currentCamPos, rayDir);
+        this.followRaycaster.far = camToPlayerDist;
+        const hits = this.followRaycaster.intersectObjects(this.proceduralEnvGroup.children, true);
+        for (const h of hits) {
+          if (h.object.name.startsWith('obstacle_') && h.object.visible) {
+            h.object.visible = false;
+            this.hiddenFollowObstacles.push(h.object);
+          }
+        }
+      }
       return;
+    }
+
+    if (Math.abs(this.camera.near - 0.1) > 0.005) {
+      this.camera.near = 0.1;
+      this.camera.updateProjectionMatrix();
     }
 
     if (this.cameraViewMode === 'first_person') {
@@ -1738,7 +1784,37 @@ export class SceneManager {
       this.currentCamTarget.copy(this.fpEyePos).add(lookDir);
       this.camera.position.copy(this.currentCamPos);
       this.camera.lookAt(this.currentCamTarget);
+
+      // Clip out any Gaussian Splat trees/bushes or procedural obstacles between camera and player
+      const playerChest = new THREE.Vector3(humanPos.x, 1.15, humanPos.z);
+      const camToPlayerDist = this.currentCamPos.distanceTo(playerChest);
+      const desiredNear = THREE.MathUtils.clamp(
+        camToPlayerDist - 0.65,
+        0.1,
+        Math.max(0.15, camToPlayerDist - 0.45)
+      );
+      if (Math.abs(this.camera.near - desiredNear) > 0.02) {
+        this.camera.near = desiredNear;
+        this.camera.updateProjectionMatrix();
+      }
+      if (this.proceduralEnvGroup) {
+        const rayDir = playerChest.clone().sub(this.currentCamPos).normalize();
+        this.followRaycaster.set(this.currentCamPos, rayDir);
+        this.followRaycaster.far = camToPlayerDist;
+        const hits = this.followRaycaster.intersectObjects(this.proceduralEnvGroup.children, true);
+        for (const h of hits) {
+          if (h.object.name.startsWith('obstacle_') && h.object.visible) {
+            h.object.visible = false;
+            this.hiddenFollowObstacles.push(h.object);
+          }
+        }
+      }
       return;
+    }
+
+    if (Math.abs(this.camera.near - 0.1) > 0.005) {
+      this.camera.near = 0.1;
+      this.camera.updateProjectionMatrix();
     }
 
     let maxEdge = 0;
