@@ -50,6 +50,41 @@ export class BotController {
 
     for (const bot of this.players) {
       if (bot.isHuman) continue;
+      this.stepAutoMovement(bot, dt, playerSpeedMult, ballPos, ballVel, phase, intercept, false);
+    }
+  }
+
+  /**
+   * Auto-moves the human player in 1st-Person Auto-Runner mode (never auto-hits; user swipes to hit).
+   */
+  public updateHumanAutoMove(dt: number, playerSpeedMult = 1.0): void {
+    const human = this.players.find((p) => p.isHuman);
+    if (!human) return;
+    const ballPos = this.physics.getBallPosition();
+    const ballVel = this.physics.getBallVelocity();
+    const intercept = predictBallIntercept(ballPos, ballVel, 1.05);
+    this.stepAutoMovement(
+      human,
+      dt,
+      playerSpeedMult,
+      ballPos,
+      ballVel,
+      this.match.phase,
+      intercept,
+      true
+    );
+  }
+
+  private stepAutoMovement(
+    bot: CharacterController,
+    dt: number,
+    playerSpeedMult: number,
+    ballPos: THREE.Vector3,
+    _ballVel: THREE.Vector3,
+    phase: string,
+    intercept: { x: number; z: number; time: number },
+    movementOnly: boolean
+  ): void {
       const idx = bot.config.slotIndex;
       const cd = Math.max(0, (this.hitCooldowns.get(idx) ?? 0) - dt);
       this.hitCooldowns.set(idx, cd);
@@ -97,43 +132,42 @@ export class BotController {
           }
 
           if (closest === bot) {
-            if (this.reactionDelay <= 0) {
-              // Chase predicted intercept point after realistic human reaction window
+            if (movementOnly || this.reactionDelay <= 0) {
               const dx = intercept.x - bot.position.x;
               const dz = intercept.z - bot.position.z;
               const distToIntercept = Math.hypot(dx, dz);
 
               if (distToIntercept > 0.25) {
                 moveIntent.set(dx / distToIntercept, dz / distToIntercept);
-                deflection = distToIntercept > 1.4 ? 0.78 : 0.48;
+                deflection = distToIntercept > 1.3 ? 0.86 : 0.5;
               }
             }
 
-            // Can hit on the way up OR down unless ball is above hitting height!
-            const actualDist = Math.hypot(
-              ballPos.x - bot.position.x,
-              ballPos.z - bot.position.z
-            );
-            const reach = bot.getEffectiveReach() * 0.72;
-            const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= MAX_HITTING_HEIGHT;
+            if (!movementOnly) {
+              // Can hit on the way up OR down unless ball is above hitting height!
+              const actualDist = Math.hypot(
+                ballPos.x - bot.position.x,
+                ballPos.z - bot.position.z
+              );
+              const reach = bot.getEffectiveReach() * 0.72;
+              const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= MAX_HITTING_HEIGHT;
 
-            if (
-              cd <= 0 &&
-              this.globalTouchCooldown <= 0 &&
-              actualDist <= reach &&
-              ballPlayable
-            ) {
-              this.performBotShot(bot, ballPos);
-              this.hitCooldowns.set(idx, 0.55);
-              this.globalTouchCooldown = 0.25;
+              if (
+                cd <= 0 &&
+                this.globalTouchCooldown <= 0 &&
+                actualDist <= reach &&
+                ballPlayable
+              ) {
+                this.performBotShot(bot, ballPos);
+                this.hitCooldowns.set(idx, 0.55);
+                this.globalTouchCooldown = 0.25;
+              }
             }
           } else {
-            // Teammate is chasing -> move to ready set/attack spot ~1.6 m from net (outside NHZ)
             this.moveToAttackReadySpot(bot, moveIntent);
             deflection = moveIntent.length() > 0.1 ? 0.55 : 0;
           }
         } else {
-          // Defending team -> spread out defensively AND try to yield path to possessing players (avoid hinder)
           this.moveToDefensiveSpot(bot, ballPos, moveIntent);
           for (const other of this.players) {
             if (other.team === bot.team) continue;
@@ -149,16 +183,13 @@ export class BotController {
           deflection = moveIntent.length() > 0.1 ? 0.54 : 0;
         }
       } else if (phase === 'SERVE_WAIT_TOSS' || phase === 'SERVE_METER_ACTIVE') {
-        // Hold quarter starting position before serve
         this.moveToStartSpot(bot, moveIntent, 0.22);
         deflection = moveIntent.length() > 0.1 ? 0.45 : 0;
       }
-      // During POINT_OVER / REDO_BANNER / MATCH_OVER, bots stay where they finished the play!
 
       const isPreServe =
         phase === 'SERVE_WAIT_TOSS' || phase === 'SERVE_METER_ACTIVE';
       bot.update(dt, moveIntent, deflection, isPreServe, playerSpeedMult);
-    }
   }
 
   private moveToStartSpot(

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CourtOffsetConfig, IntroCameraStyle } from '../config/maps';
 import { JoystickVisualState } from '../engine/InputManager';
 import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
-import { OffscreenLandingHint } from '../engine/SceneManager';
+import { FirstPersonHints, OffscreenLandingHint } from '../engine/SceneManager';
 import { CalibratorPanel, CalibratorTab } from './CalibratorPanel';
 import { MenuDrawer } from './MenuDrawer';
 
@@ -11,6 +11,8 @@ interface GameHUDProps {
   joystick: JoystickVisualState;
   popups: TimingPopup[];
   offscreenLanding: OffscreenLandingHint;
+  fpHints: FirstPersonHints;
+  hitTimingBar: { visible: boolean; value: number };
   isHumanBlocking: boolean;
   returnToNetActive: boolean;
   onReturnToNetPress: (active: boolean) => void;
@@ -41,6 +43,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   joystick,
   popups,
   offscreenLanding,
+  fpHints,
+  hitTimingBar,
   isHumanBlocking,
   returnToNetActive,
   onReturnToNetPress,
@@ -172,35 +176,90 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Bottom-Left Persistent 3D Arcade Cluster: Unlabeled Retro Net Button + Persistent 3D Cupped Joystick */}
-      <div className="bottom-left-cluster">
-        <button
-          data-ui-interactive="true"
-          className={`return-net-btn retro-circle-btn ${returnToNetActive ? 'active' : ''}`}
-          onPointerDown={() => onReturnToNetPress(true)}
-          onPointerUp={() => onReturnToNetPress(false)}
-          onPointerCancel={() => onReturnToNetPress(false)}
-          aria-label="Move to net"
+      {/* 1st-Person Edge Indicators: Net & Partner */}
+      {cameraViewMode === 'first_person' && fpHints.netEdge.visible && (
+        <div
+          className="fp-edge-badge net-edge"
+          style={{
+            left: fpHints.netEdge.screenX,
+            top: fpHints.netEdge.screenY,
+          }}
         >
-          <span className="circle-btn-icon">◎</span>
-        </button>
-
-        <div id="persistent-joystick-base" className="joystick-base-3d">
-          <div className="joystick-walk-ring" />
-          <div
-            className={`joystick-thumb-3d ${joystick.isSprint ? 'sprint' : ''}`}
-            style={{
-              transform: joystick.active
-                ? `translate(${joystick.thumbX - joystick.originX}px, ${joystick.thumbY - joystick.originY}px)`
-                : 'translate(0px, 0px)',
-            }}
-          />
+          <span>NET</span>
+          <span
+            className="fp-edge-arrow"
+            style={{ transform: `rotate(${fpHints.netEdge.angleDeg}deg)` }}
+          >
+            ➤
+          </span>
         </div>
-      </div>
+      )}
+
+      {cameraViewMode === 'first_person' && fpHints.partnerEdge.visible && (
+        <div
+          className="fp-edge-badge partner-edge"
+          style={{
+            left: fpHints.partnerEdge.screenX,
+            top: fpHints.partnerEdge.screenY,
+          }}
+        >
+          <span>PARTNER</span>
+          <span
+            className="fp-edge-arrow"
+            style={{ transform: `rotate(${fpHints.partnerEdge.angleDeg}deg)` }}
+          >
+            ➤
+          </span>
+        </div>
+      )}
+
+      {/* Ball-Approach Hit Timing Bar (shown when ball is close enough to swing) */}
+      {hitTimingBar.visible && !hud.serveMeterActive && (
+        <div className="hit-timing-wrap">
+          <div className="hit-timing-label">SWIPE TO HIT</div>
+          <div className="serve-meter-bar">
+            <div className="serve-meter-sweet" />
+            <div
+              className="serve-meter-cursor"
+              style={{ left: `${hitTimingBar.value * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Bottom-Left Persistent 3D Arcade Cluster (Press-Box mode only) */}
+      {cameraViewMode === 'pressbox' && (
+        <div className="bottom-left-cluster">
+          <button
+            data-ui-interactive="true"
+            className={`return-net-btn retro-circle-btn ${returnToNetActive ? 'active' : ''}`}
+            onPointerDown={() => onReturnToNetPress(true)}
+            onPointerUp={() => onReturnToNetPress(false)}
+            onPointerCancel={() => onReturnToNetPress(false)}
+            aria-label="Move to net"
+          >
+            <span className="circle-btn-icon">◎</span>
+          </button>
+
+          <div id="persistent-joystick-base" className="joystick-base-3d">
+            <div className="joystick-walk-ring" />
+            <div
+              className={`joystick-thumb-3d ${joystick.isSprint ? 'sprint' : ''}`}
+              style={{
+                transform: joystick.active
+                  ? `translate(${joystick.thumbX - joystick.originX}px, ${joystick.thumbY - joystick.originY}px)`
+                  : 'translate(0px, 0px)',
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Subtle Touch Hint on Bottom Right */}
       <div className="right-zone-hint">
-        Swipe: Hit / Set / Spike · Hold: Block
+        {cameraViewMode === 'first_person'
+          ? 'Swipe Anywhere: Up = Set · Cut/Down = Hit Net · Hold = Block'
+          : 'Swipe: Hit / Set / Spike · Hold: Block'}
       </div>
 
       <MenuDrawer

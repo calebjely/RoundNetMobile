@@ -26,6 +26,11 @@ export interface OffscreenLandingHint {
   teamColor: string;
 }
 
+export interface FirstPersonHints {
+  netEdge: OffscreenLandingHint;
+  partnerEdge: OffscreenLandingHint;
+}
+
 export class SceneManager {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
@@ -43,11 +48,22 @@ export class SceneManager {
   private calibrateMode = false;
   private calibrateTab: 'camera' | 'net' = 'camera';
   private calibrateServeSlot = 0;
-  private cameraViewMode: 'pressbox' | 'first_person' = 'pressbox';
+  private cameraViewMode: 'pressbox' | 'first_person' = 'first_person';
   private netPointers = new Map<number, { x: number; y: number }>();
   private netPrevPinchDist = 0;
   private onCourtOffsetSync?: (offset: CourtOffsetConfig) => void;
   private onCameraPresetChanged?: () => void;
+
+  // 1st-Person Swinging Arm + Edge Indicators
+  private fpArmPivot!: THREE.Group;
+  private fpSwingElapsed = -1;
+  private fpSwingDuration = 0.28;
+  private fpSwingDir = new THREE.Vector2(0, -1);
+  private fpBlocking = false;
+  private fpHints: FirstPersonHints = {
+    netEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#facc15' },
+    partnerEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' },
+  };
 
   // Starting game cinematic camera intro animation
   private introSpinElapsed = -1;
@@ -154,8 +170,10 @@ export class SceneManager {
     this.scene.add(this.netGroup);
     this.createNetDirectionArrow();
     this.createLandingCircle();
+    this.createFirstPersonArm();
     this.ballMesh = this.createOfficialBall();
     this.scene.add(this.ballMesh);
+    this.scene.add(this.camera);
 
     window.addEventListener('resize', this.handleResize);
   }
@@ -613,6 +631,110 @@ export class SceneManager {
     return env;
   }
 
+  private createFirstPersonArm(): void {
+    const pivot = new THREE.Group();
+    pivot.position.set(0.28, -0.26, -0.34);
+    pivot.visible = this.cameraViewMode === 'first_person';
+
+    const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.55 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xe8be9e, roughness: 0.6 });
+
+    const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.24, 6, 10), skinMat);
+    forearm.rotation.x = Math.PI * 0.42;
+    forearm.position.set(0, 0.04, -0.14);
+    pivot.add(forearm);
+
+    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.12, 6, 10), sleeveMat);
+    sleeve.rotation.x = Math.PI * 0.42;
+    sleeve.position.set(0, -0.02, -0.02);
+    pivot.add(sleeve);
+
+    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.032, 0.11), skinMat);
+    hand.position.set(0, 0.09, -0.28);
+    pivot.add(hand);
+
+    this.fpArmPivot = pivot;
+    this.camera.add(pivot);
+  }
+
+  public triggerFirstPersonSwing(dx: number, dy: number, speedPx: number): void {
+    if (this.cameraViewMode !== 'first_person') return;
+    const len = Math.max(1, Math.hypot(dx, dy));
+    this.fpSwingDir.set(dx / len, dy / len);
+    this.fpSwingDuration = THREE.MathUtils.clamp(0.34 - speedPx * 0.0001, 0.18, 0.34);
+    this.fpSwingElapsed = 0;
+  }
+
+  public setFirstPersonBlock(blocking: boolean): void {
+    this.fpBlocking = blocking;
+  }
+
+  public updateFirstPersonArm(dt: number): void {
+    if (!this.fpArmPivot) return;
+    const show = this.cameraViewMode === 'first_person' && !this.calibrateMode;
+    this.fpArmPivot.visible = show;
+    if (!show) return;
+
+    if (this.fpSwingElapsed >= 0) {
+      this.fpSwingElapsed += dt;
+      const t = Math.min(1, this.fpSwingElapsed / this.fpSwingDuration);
+      const swingCurve = Math.sin(t * Math.PI);
+      const sx = this.fpSwingDir.x;
+      const sy = this.fpSwingDir.y;
+
+      this.fpArmPivot.position.set(
+        0.26 + sx * swingCurve * 0.24,
+        -0.24 - sy * swingCurve * 0.22,
+        -0.34 - swingCurve * 0.2
+      );
+      this.fpArmPivot.rotation.set(
+        -sy * swingCurve * 0.95,
+        -sx * swingCurve * 1.15,
+        -sx * swingCurve * 0.65
+      );
+      if (t >= 1) {
+        this.fpSwingElapsed = -1;
+      }
+      return;
+    }
+
+    if (this.fpBlocking) {
+      this.fpArmPivot.position.lerp(new THREE.Vector3(0.14, -0.06, -0.36), 1 - Math.exp(-dt * 14));
+      this.fpArmPivot.rotation.set(0.65, 0.3, 0.2);
+    } else {
+      this.fpArmPivot.position.lerp(new THREE.Vector3(0.28, -0.26, -0.34), 1 - Math.exp(-dt * 10));
+      this.fpArmPivot.rotation.set(0, 0, 0);
+    }
+  }
+
+  public getFirstPersonHints(): FirstPersonHints {
+    return {
+      netEdge: { ...this.fpHints.netEdge },
+      partnerEdge: { ...this.fpHints.partnerEdge },
+    };
+  }
+
+  private projectEdgeIndicator(worldPos: THREE.Vector3, teamColor: string): OffscreenLandingHint {
+    const proj = worldPos.clone().project(this.camera);
+    const behind = proj.z > 1;
+    let nx = behind ? -proj.x : proj.x;
+    let ny = behind ? -proj.y : proj.y;
+    const isOffCenter = behind || Math.abs(nx) > 0.72 || Math.abs(ny) > 0.72;
+    if (!isOffCenter) {
+      return { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor };
+    }
+    const maxAxis = Math.max(Math.abs(nx), Math.abs(ny), 0.001);
+    nx /= maxAxis;
+    ny /= maxAxis;
+    const pad = 38;
+    const halfW = window.innerWidth * 0.5 - pad;
+    const halfH = window.innerHeight * 0.5 - pad;
+    const sx = window.innerWidth * 0.5 + nx * halfW;
+    const sy = window.innerHeight * 0.5 - ny * halfH;
+    const angleDeg = (Math.atan2(-ny, nx) * 180) / Math.PI;
+    return { visible: true, screenX: sx, screenY: sy, angleDeg, teamColor };
+  }
+
   private createNetDirectionArrow(): void {
     // 1. Dot on the net surface showing exact impact point
     const dotGeo = new THREE.CircleGeometry(0.06, 24);
@@ -715,8 +837,25 @@ export class SceneManager {
     isLive: boolean,
     isAimedAfterHit: boolean,
     activeTeamHex: number,
-    activeTeamCss: string
+    activeTeamCss: string,
+    partnerPos?: THREE.Vector3
   ): void {
+    if (this.cameraViewMode === 'first_person' && !this.calibrateMode) {
+      this.fpHints.netEdge = this.projectEdgeIndicator(
+        new THREE.Vector3(0, 0.25, 0),
+        '#facc15'
+      );
+      this.fpHints.partnerEdge = partnerPos
+        ? this.projectEdgeIndicator(
+            new THREE.Vector3(partnerPos.x, 1.35, partnerPos.z),
+            '#60a5fa'
+          )
+        : { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' };
+    } else {
+      this.fpHints.netEdge.visible = false;
+      this.fpHints.partnerEdge.visible = false;
+    }
+
     if (!isLive || ballPos.y <= OFFICIAL_BALL.radius + 0.01) {
       this.netHitDotMesh.visible = false;
       this.netArrowGroup.visible = false;
@@ -1223,15 +1362,15 @@ export class SceneManager {
     }
 
     if (this.cameraViewMode === 'first_person') {
-      const eyePos = new THREE.Vector3(humanPos.x, 1.68, humanPos.z);
-      const netFocus = new THREE.Vector3(0, 0.35, 0);
-      const desiredTarget = netFocus.lerp(ballPos, 0.45);
+      const eyePos = new THREE.Vector3(humanPos.x, 1.66, humanPos.z);
+      // 1st-person sight automatically follows the ball!
+      const desiredTarget = ballPos.clone();
       const lookDir = desiredTarget.clone().sub(eyePos).setY(0);
       if (lookDir.lengthSq() > 0.001) {
         lookDir.normalize();
-        eyePos.addScaledVector(lookDir, 0.24);
+        eyePos.addScaledVector(lookDir, 0.16);
       }
-      const fpRate = 1 - Math.exp(-dt * 10);
+      const fpRate = 1 - Math.exp(-dt * 11);
       this.currentCamPos.lerp(eyePos, fpRate);
       this.currentCamTarget.lerp(desiredTarget, fpRate);
       this.camera.position.copy(this.currentCamPos);

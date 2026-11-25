@@ -16,7 +16,11 @@ import { CharacterController } from './engine/CharacterController';
 import { InputManager, JoystickVisualState } from './engine/InputManager';
 import { MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
 import { PhysicsWorld } from './engine/PhysicsWorld';
-import { OffscreenLandingHint, SceneManager } from './engine/SceneManager';
+import {
+  FirstPersonHints,
+  OffscreenLandingHint,
+  SceneManager,
+} from './engine/SceneManager';
 import { CalibratorTab } from './ui/CalibratorPanel';
 import { GameHUD } from './ui/GameHUD';
 import './styles.css';
@@ -44,13 +48,21 @@ const App: React.FC = () => {
     angleDeg: 0,
     teamColor: '#3b82f6',
   });
+  const [fpHints, setFpHints] = useState<FirstPersonHints>({
+    netEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#facc15' },
+    partnerEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' },
+  });
+  const [hitTimingBar, setHitTimingBar] = useState<{ visible: boolean; value: number }>({
+    visible: false,
+    value: 0.5,
+  });
   const [returnToNetActive, setReturnToNetActive] = useState(false);
   const [calibrateMode, setCalibrateMode] = useState(
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
   const [calibrateTab, setCalibrateTab] = useState<CalibratorTab>('camera');
   const [calibrateServeSlot, setCalibrateServeSlot] = useState<number>(0);
-  const [cameraViewMode, setCameraViewMode] = useState<'pressbox' | 'first_person'>('pressbox');
+  const [cameraViewMode, setCameraViewMode] = useState<'pressbox' | 'first_person'>('first_person');
   const [introStyle, setIntroStyle] = useState<IntroCameraStyle>(
     initialSaved.current.introCameraStyle
   );
@@ -160,6 +172,9 @@ const App: React.FC = () => {
       await Promise.all(players.map((p) => p.initModel()));
       if (disposed) return;
 
+      // Default to 1st-Person Auto-Runner mode on boot
+      human.root.visible = sceneMgr.getCameraViewMode() !== 'first_person';
+
       matchMgr = new MatchManager(players, physics, sceneMgr.camera, (x, z, speed) =>
         sceneMgr.triggerNetRipple(x, z, speed)
       );
@@ -168,6 +183,7 @@ const App: React.FC = () => {
       inputMgr = new InputManager(container, {
         onSwipe: (swipe) => {
           sceneMgr.skipIntroSpin();
+          sceneMgr.triggerFirstPersonSwing(swipe.dx, swipe.dy, swipe.speedPxPerSec);
           const camFwd = new THREE.Vector3();
           sceneMgr.camera.getWorldDirection(camFwd);
           camFwd.y = 0;
@@ -180,9 +196,11 @@ const App: React.FC = () => {
         onBlockStart: () => {
           sceneMgr.skipIntroSpin();
           human.isBlocking = true;
+          sceneMgr.setFirstPersonBlock(true);
         },
         onBlockEnd: () => {
           human.isBlocking = false;
+          sceneMgr.setFirstPersonBlock(false);
         },
         onReturnToNetCancel: () => {
           sceneMgr.skipIntroSpin();
@@ -193,6 +211,7 @@ const App: React.FC = () => {
         },
       });
       inputMgr.enabled = !initialCalibrate;
+      inputMgr.fullScreenSwipe = sceneMgr.getCameraViewMode() === 'first_person';
 
       engineRef.current = {
         sceneMgr,
@@ -256,31 +275,34 @@ const App: React.FC = () => {
         }
         const isPreServe =
           matchMgr.phase === 'SERVE_WAIT_TOSS' || matchMgr.phase === 'SERVE_METER_ACTIVE';
+        const plrSpd = playerSpeedRef.current;
 
-        if (engineRef.current?.returnToNet && deflection < 0.05) {
-          // Pre-serve -> move up to the ~6 ft service line (2.66 m);
-          // After serve / live play -> sprint all the way up to the net (0.68 m)!
-          const curR = Math.hypot(human.position.x, human.position.z);
-          const curAngle = curR > 0.01 ? Math.atan2(human.position.x, human.position.z) : 0;
-          const desiredRadius = isPreServe ? 2.66 : 0.68;
-          const target = new THREE.Vector3(
-            Math.sin(curAngle) * desiredRadius,
-            0,
-            Math.cos(curAngle) * desiredRadius
-          );
-          const toTarget = target.sub(human.position);
-          const dist = Math.hypot(toTarget.x, toTarget.z);
-          if (dist > 0.16) {
-            dir.set(toTarget.x / dist, toTarget.z / dist);
-            deflection = 0.92;
-          } else {
-            engineRef.current.returnToNet = false;
-            setReturnToNetActive(false);
+        if (sceneMgr.getCameraViewMode() === 'first_person') {
+          // 1st-Person Auto-Runner: character automatically runs & positions; user only swipes!
+          bots.updateHumanAutoMove(simDt, plrSpd);
+        } else {
+          if (engineRef.current?.returnToNet && deflection < 0.05) {
+            const curR = Math.hypot(human.position.x, human.position.z);
+            const curAngle = curR > 0.01 ? Math.atan2(human.position.x, human.position.z) : 0;
+            const desiredRadius = isPreServe ? 2.66 : 0.68;
+            const target = new THREE.Vector3(
+              Math.sin(curAngle) * desiredRadius,
+              0,
+              Math.cos(curAngle) * desiredRadius
+            );
+            const toTarget = target.sub(human.position);
+            const dist = Math.hypot(toTarget.x, toTarget.z);
+            if (dist > 0.16) {
+              dir.set(toTarget.x / dist, toTarget.z / dist);
+              deflection = 0.92;
+            } else {
+              engineRef.current.returnToNet = false;
+              setReturnToNetActive(false);
+            }
           }
+          human.update(simDt, dir, deflection, isPreServe, plrSpd);
         }
 
-        const plrSpd = playerSpeedRef.current;
-        human.update(simDt, dir, deflection, isPreServe, plrSpd);
         bots.update(simDt, plrSpd);
 
         // Fixed-timestep physics accumulator so mobile 30fps runs at true 1.0x+ normal speed!
@@ -319,14 +341,19 @@ const App: React.FC = () => {
               ? matchMgr.getServingTeam()
               : matchMgr.possessionTeam;
         const teamMeta = TEAM_COLORS[activeBallTeam];
+        const teammate = players.find(
+          (p) => p.team === human.team && p.config.slotIndex !== human.config.slotIndex
+        );
         sceneMgr.updateBallIndicators(
           ballPos,
           ballVel,
           isBallLive,
           isAimedAfterHit,
           teamMeta.hex,
-          teamMeta.primary
+          teamMeta.primary,
+          teammate?.position
         );
+        sceneMgr.updateFirstPersonArm(rawDt);
 
         const tracked = players.map((p) => p.position);
         tracked.push(ballPos);
@@ -340,7 +367,28 @@ const App: React.FC = () => {
           setJoystick({ ...inputMgr.joystickState });
           setPopups([...matchMgr.popups]);
           setOffscreenLanding(sceneMgr.getOffscreenLandingHint());
+          setFpHints(sceneMgr.getFirstPersonHints());
           setIsHumanBlocking(human.isBlocking);
+
+          // Hit timing bar: visible when it's human's team's turn & ball is approaching within 3.6 m
+          const isHumansTurn =
+            (matchMgr.phase === 'SERVE_IN_FLIGHT' &&
+              matchMgr.serveReboundedOffNet &&
+              human.team !== matchMgr.getServingTeam()) ||
+            (matchMgr.phase === 'RALLY_LIVE' &&
+              matchMgr.possessionTeam === human.team &&
+              matchMgr.lastTouchPlayerIdx !== human.config.slotIndex);
+          const distToBall = Math.hypot(
+            ballPos.x - human.position.x,
+            ballPos.z - human.position.z
+          );
+          if (isHumansTurn && distToBall <= 3.6) {
+            // Map distance + height to 0 (Early) -> 0.5 (Perfect) -> 1.0 (Late)
+            const val = THREE.MathUtils.clamp(1.0 - distToBall / 3.4, 0.04, 0.96);
+            setHitTimingBar({ visible: true, value: val });
+          } else {
+            setHitTimingBar({ visible: false, value: 0.5 });
+          }
         }
 
         rafId = requestAnimationFrame(tick);
@@ -402,6 +450,8 @@ const App: React.FC = () => {
           joystick={joystick}
           popups={popups}
           offscreenLanding={offscreenLanding}
+          fpHints={fpHints}
+          hitTimingBar={hitTimingBar}
           isHumanBlocking={isHumanBlocking}
           returnToNetActive={returnToNetActive}
           onReturnToNetPress={(active) => {
@@ -428,6 +478,7 @@ const App: React.FC = () => {
             if (inst) {
               inst.sceneMgr.setCameraViewMode(mode);
               inst.human.root.visible = mode !== 'first_person';
+              inst.inputMgr.fullScreenSwipe = mode === 'first_person';
             }
           }}
           introStyle={introStyle}

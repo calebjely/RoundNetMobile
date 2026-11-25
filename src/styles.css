@@ -651,3 +651,58 @@ body,
   box-shadow: 0 0 12px rgba(250, 204, 21, 0.55);
   z-index: 25;
 }
+
+.fp-edge-badge {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.85);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  z-index: 24;
+  white-space: nowrap;
+}
+
+.fp-edge-badge.net-edge {
+  border: 2px solid #facc15;
+  color: #fde047;
+  box-shadow: 0 0 10px rgba(250, 204, 21, 0.45);
+}
+
+.fp-edge-badge.partner-edge {
+  border: 2px solid #60a5fa;
+  color: #93c5fd;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.45);
+}
+
+.fp-edge-arrow {
+  display: inline-block;
+  font-size: 12px;
+}
+
+.hit-timing-wrap {
+  position: fixed;
+  bottom: max(44px, calc(env(safe-area-inset-bottom) + 34px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  background: rgba(15, 23, 42, 0.82);
+  padding: 7px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  z-index: 22;
+}
+
+.hit-timing-label {
+  font-size: 10px;
+  font-weight: 900;
+  color: #38bdf8;
+  text-align: center;
+  margin-bottom: 5px;
+  letter-spacing: 0.06em;
+}

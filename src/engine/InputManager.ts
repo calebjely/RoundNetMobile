@@ -56,6 +56,8 @@ export class InputManager {
   // Desktop keyboard fallback
   private keys = new Set<string>();
   public enabled = true;
+  /** When true (1st-person auto-runner), swiping anywhere on screen triggers hits */
+  public fullScreenSwipe = true;
 
   constructor(element: HTMLElement, callbacks: InputCallbacks) {
     this.element = element;
@@ -78,7 +80,7 @@ export class InputManager {
     }
 
     const halfW = window.innerWidth * 0.5;
-    if (e.clientX < halfW && this.leftPointerId === null) {
+    if (!this.fullScreenSwipe && e.clientX < halfW && this.leftPointerId === null) {
       this.leftPointerId = e.pointerId;
       this.callbacks.onReturnToNetCancel();
       // If user touches inside the persistent bottom-left joystick area, anchor to it; otherwise dynamic origin
@@ -104,7 +106,7 @@ export class InputManager {
         isSprint: false,
       };
       this.updateLeftThumb(e.clientX, e.clientY);
-    } else if (e.clientX >= halfW && this.rightPointerId === null) {
+    } else if ((this.fullScreenSwipe || e.clientX >= halfW) && this.rightPointerId === null) {
       this.rightPointerId = e.pointerId;
       this.rightStartX = e.clientX;
       this.rightStartY = e.clientY;
