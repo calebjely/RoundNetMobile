@@ -270,12 +270,12 @@ export class InputManager {
           this.swipeVisual.inRange = target?.inRange ?? false;
         }
         if (target && !target.allowAnywhere) {
-          // Live ball hitting: touch the ball and swipe in your desired direction when in range
-          const hitOnBall = this.startedOnBall && target.inRange && distFromStart >= 46;
+          // Responsive hitting when in range: touch-ball drag, swipe-through-ball, OR natural swipe anywhere
+          const hitOnBall = this.startedOnBall && target.inRange && distFromStart >= 36;
           const swipedThroughBall =
             !this.startedOnBall &&
             target.inRange &&
-            distFromStart >= 30 &&
+            distFromStart >= 28 &&
             this.segmentHitsCircle(
               prev ? prev.x : this.rightStartX,
               prev ? prev.y : this.rightStartY,
@@ -283,9 +283,10 @@ export class InputManager {
               e.clientY,
               target.x,
               target.y,
-              Math.max(target.radiusPx * 1.15, 88)
+              Math.max(target.radiusPx * 1.25, 96)
             );
-          if (hitOnBall || swipedThroughBall) {
+          const naturalSwipe = !this.startedOnBall && target.inRange && distFromStart >= 52;
+          if (hitOnBall || swipedThroughBall || naturalSwipe) {
             this.swipeVisual.active = false;
             this.emitBufferedSwipe(now, e.clientX, e.clientY);
           }

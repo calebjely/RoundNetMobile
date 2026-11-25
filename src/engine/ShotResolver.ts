@@ -145,25 +145,25 @@ export class ShotResolver {
 
     const signedDt = tHoriz > 0.08 ? Math.max(tHoriz, dtVert) : dtVert;
     const inRange =
-      horizDist <= 2.65 &&
-      ballPos.y >= 0.18 &&
-      ballPos.y <= MAX_HITTING_HEIGHT + 0.16;
+      horizDist <= 2.95 &&
+      ballPos.y >= 0.15 &&
+      ballPos.y <= MAX_HITTING_HEIGHT + 0.22;
 
     let zone: ContactZone;
     let timing: TimingQuality;
     if (!inRange) {
-      zone = horizDist <= 3.55 && ballPos.y <= MAX_HITTING_HEIGHT + 0.6 ? 'yellow' : 'red';
+      zone = horizDist <= 3.7 && ballPos.y <= MAX_HITTING_HEIGHT + 0.65 ? 'yellow' : 'red';
       timing = 'Early';
     } else if (
-      horizDist <= 2.4 &&
-      ballPos.y >= 0.5 &&
-      ballPos.y <= 1.88 &&
-      signedDt >= -0.14 &&
-      signedDt <= 0.28
+      horizDist <= 2.65 &&
+      ballPos.y >= 0.45 &&
+      ballPos.y <= 1.92 &&
+      signedDt >= -0.16 &&
+      signedDt <= 0.3
     ) {
       zone = 'green';
       timing = 'Perfect';
-    } else if (signedDt >= -0.25 && signedDt <= 0.48 && ballPos.y >= 0.26) {
+    } else if (signedDt >= -0.28 && signedDt <= 0.5 && ballPos.y >= 0.22) {
       zone = 'yellow';
       timing = signedDt > 0 ? 'Early' : 'Late';
     } else {
@@ -211,16 +211,16 @@ export class ShotResolver {
     precomputedTiming?: ContactTiming
   ): ShotOutcome | null {
     const horizDist = Math.hypot(ballPos.x - player.position.x, ballPos.z - player.position.z);
-    const baseReach = Math.max(player.getEffectiveReach(), 2.35);
+    const baseReach = Math.max(player.getEffectiveReach(), 2.65);
     // Auto-dive ONLY when ball is near the outer edge of hitting range
     const shouldAutoDive =
-      horizDist > baseReach * 0.94 &&
+      horizDist > baseReach * 0.95 &&
       horizDist <= baseReach + 0.65 &&
-      ballPos.y <= MAX_HITTING_HEIGHT + 0.16;
+      ballPos.y <= MAX_HITTING_HEIGHT + 0.22;
 
     const maxReach = baseReach + (shouldAutoDive ? 0.65 : 0);
     // Can hit on the way up OR down unless ball is above hitting height!
-    if (horizDist > maxReach || ballPos.y > MAX_HITTING_HEIGHT + 0.16) {
+    if (horizDist > maxReach || ballPos.y > MAX_HITTING_HEIGHT + 0.22) {
       return null;
     }
 
@@ -320,25 +320,31 @@ export class ShotResolver {
 
     // 2. SPIKE HIT (Downward cone: hard steep driven spike onto net)
     if (shotType === 'SPIKE') {
-      // Later timing + low ball far from net pushes target lower onto front rim (harder to hit cleanly)
-      const lateDropPenalty = offset > 0.15 ? offset * 0.12 : 0;
-      const distPenalty = distToNet > 2.35 && ballPos.y < 0.9 ? 0.1 : 0;
-      const lateralOffset = swipeDirX * 0.36;
-      const depthAim = THREE.MathUtils.clamp((power01 - 0.5) * 0.22 - offset * 0.12, -0.26, 0.26);
+      // Keep clean green/yellow spikes comfortably inside the 0.457 m rim and above front-rim height!
+      const lateDropPenalty = zone === 'red' ? 0.05 : offset > 0.28 ? (offset - 0.28) * 0.08 : 0;
+      const lateralOffset = swipeDirX * 0.2;
+      const depthAim = THREE.MathUtils.clamp((power01 - 0.5) * 0.14 - offset * 0.08, -0.14, 0.14);
 
       const target = new THREE.Vector3(
-        rightHoriz.x * lateralOffset + toNet.x * depthAim + randScatterX * 1.15,
-        netPlaneY - 0.02 - lateDropPenalty - distPenalty,
-        rightHoriz.z * lateralOffset + toNet.z * depthAim + randScatterZ * 1.15
+        rightHoriz.x * lateralOffset + toNet.x * depthAim + randScatterX * 0.65,
+        netPlaneY + 0.03 - lateDropPenalty,
+        rightHoriz.z * lateralOffset + toNet.z * depthAim + randScatterZ * 0.65
       );
+      // Clamp horizontal hit point safely inside the rim unless it's a red shank
+      const maxHitR = zone === 'red' ? 0.34 : 0.23;
+      const hitR = Math.hypot(target.x, target.z);
+      if (hitR > maxHitR) {
+        target.x = (target.x / hitR) * maxHitR;
+        target.z = (target.z / hitR) * maxHitR;
+      }
 
       // Faster swipe = blistering faster downward flight; early keeps higher clearance
-      const desiredSpeed = THREE.MathUtils.lerp(7.8, 13.8, Math.min(1, power01 * powerMod));
-      const baseFlight = THREE.MathUtils.clamp(distToNet / desiredSpeed, 0.13, 0.38);
+      const desiredSpeed = THREE.MathUtils.lerp(7.8, 13.5, Math.min(1, power01 * powerMod));
+      const baseFlight = THREE.MathUtils.clamp(distToNet / desiredSpeed, 0.15, 0.38);
       const flightTime =
         offset < -0.25
-          ? THREE.MathUtils.clamp(baseFlight * 1.55, 0.22, 0.52) // early pops higher off net
-          : THREE.MathUtils.clamp(baseFlight * (1 - offset * 0.18), 0.12, 0.36);
+          ? THREE.MathUtils.clamp(baseFlight * 1.45, 0.22, 0.5) // early pops higher off net
+          : THREE.MathUtils.clamp(baseFlight * (1 - offset * 0.14), 0.15, 0.36);
 
       return {
         velocity: computeBallisticVelocity(ballPos, target, flightTime),
@@ -384,12 +390,18 @@ export class ShotResolver {
     }
 
     // Low driven cut / angled pass directly at the net
-    const lateralCut = swipeDirX * 0.38;
+    const lateralCut = swipeDirX * 0.22;
     const target = new THREE.Vector3(
-      rightHoriz.x * lateralCut + toNet.x * (-offset * 0.08) + randScatterX,
-      netPlaneY + (zone === 'red' ? -0.05 : offset > 0.25 ? -0.025 : 0),
-      rightHoriz.z * lateralCut + toNet.z * (-offset * 0.08) + randScatterZ
+      rightHoriz.x * lateralCut + toNet.x * (-offset * 0.06) + randScatterX * 0.7,
+      netPlaneY + (zone === 'red' ? -0.02 : 0.03),
+      rightHoriz.z * lateralCut + toNet.z * (-offset * 0.06) + randScatterZ * 0.7
     );
+    const maxCutR = zone === 'red' ? 0.34 : 0.24;
+    const cutR = Math.hypot(target.x, target.z);
+    if (cutR > maxCutR) {
+      target.x = (target.x / cutR) * maxCutR;
+      target.z = (target.z / cutR) * maxCutR;
+    }
     const baseSpeed = THREE.MathUtils.lerp(6.4, 11.4, power01 * powerMod);
     const rawT = distToNet / baseSpeed;
     // Higher swipe angle -> slightly loftier lob; pure side-to-side + late -> flatter & lower
@@ -421,11 +433,11 @@ export class ShotResolver {
     meterValue: number,
     camRight = new THREE.Vector3(1, 0, 0)
   ): { velocity: THREE.Vector3; quality: TimingQuality; isShank: boolean } {
-    // Sweet spot is 0.35 .. 0.65 on the 0..1 golf meter
+    // Sweet spot is 0.28 .. 0.72 on the 0..1 golf meter
     const distFromCenter = Math.abs(meterValue - 0.5);
-    const inSweetSpot = distFromCenter <= 0.15;
+    const inSweetSpot = distFromCenter <= 0.22;
     const quality: TimingQuality =
-      distFromCenter <= 0.065 ? 'Perfect' : inSweetSpot ? 'Early' : 'Late';
+      distFromCenter <= 0.09 ? 'Perfect' : inSweetSpot ? 'Early' : 'Late';
 
     const swipeLen = Math.max(1, swipe.distancePx);
     const dirX = swipe.dx / swipeLen;
@@ -434,39 +446,38 @@ export class ShotResolver {
     const longMod = server.config.profile.stats.longGame;
     const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
 
-    const lateral = camRight.clone().setY(0).normalize().multiplyScalar(dirX * 0.24);
+    const lateral = camRight.clone().setY(0).normalize().multiplyScalar(dirX * 0.14);
 
     if (!inSweetSpot) {
-      // Shank / bad angle / rim or miss
+      // Off-timing serve: drifts wider/higher, still playable if close to sweet spot
       const shankSide = camRight
         .clone()
         .setY(0)
         .normalize()
-        .multiplyScalar((meterValue - 0.5) * 1.45);
+        .multiplyScalar((meterValue - 0.5) * 0.75);
       const target = new THREE.Vector3(
         shankSide.x + lateral.x,
-        netPlaneY + (dirY < -0.3 ? 0.38 : -0.06),
+        netPlaneY + (dirY < -0.3 ? 0.22 : -0.03),
         shankSide.z + lateral.z
       );
       return {
-        velocity: computeBallisticVelocity(ballPos, target, 0.5),
+        velocity: computeBallisticVelocity(ballPos, target, 0.44),
         quality,
         isShank: true,
       };
     }
 
-    const spread = quality === 'Perfect' ? 0.03 : 0.1 / longMod;
+    const spread = quality === 'Perfect' ? 0.02 : 0.06 / longMod;
     const target = new THREE.Vector3(
       lateral.x + (Math.random() - 0.5) * spread,
-      netPlaneY,
+      netPlaneY + 0.015,
       lateral.z + (Math.random() - 0.5) * spread
     );
 
-    // Calibrated serve flight time so sweet-spot serves hit crisp and bounce legally (~0.95-1.35 m, < 1.65 m)
-    // Higher ballPos.y uses a slightly quicker drive time so downward vy_in stays legal!
-    const heightAdj = Math.max(0, ballPos.y - 1.25) * 0.08;
-    const baseFlight = (dirY > 0.3 ? 0.29 : dirY < -0.3 ? 0.37 : 0.33) - heightAdj;
-    const flightTime = THREE.MathUtils.clamp(baseFlight / (0.92 + 0.08 * powerMod), 0.24, 0.4);
+    // Higher ballPos.y needs a LONGER flightTime so downward vy_impact stays ~4.2 m/s (bounce peak ~1.05-1.32 m, NEVER > 1.65 m!)
+    const heightAdj = Math.max(0, ballPos.y - 1.15) * 0.14;
+    const baseFlight = (dirY > 0.3 ? 0.40 : dirY < -0.3 ? 0.45 : 0.42) + heightAdj;
+    const flightTime = THREE.MathUtils.clamp(baseFlight / (0.94 + 0.06 * powerMod), 0.38, 0.56);
 
     return {
       velocity: computeBallisticVelocity(ballPos, target, flightTime),

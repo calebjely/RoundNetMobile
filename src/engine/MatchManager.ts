@@ -606,7 +606,7 @@ export class MatchManager {
 
     // Golf-style timing meter oscillation (smooth, readable pace)
     if (this.phase === 'SERVE_METER_ACTIVE') {
-      this.serveMeterValue += this.serveMeterDir * dt * 1.35;
+      this.serveMeterValue += this.serveMeterDir * dt * 1.05;
       if (this.serveMeterValue >= 1) {
         this.serveMeterValue = 1;
         this.serveMeterDir = -1;
