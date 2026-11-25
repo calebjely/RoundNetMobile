@@ -12,7 +12,8 @@ interface GameHUDProps {
   popups: TimingPopup[];
   offscreenLanding: OffscreenLandingHint;
   fpHints: FirstPersonHints;
-  hitTimingBar: { visible: boolean; value: number };
+  stance: 'close' | 'away';
+  onToggleStance: () => void;
   isHumanBlocking: boolean;
   returnToNetActive: boolean;
   onReturnToNetPress: (active: boolean) => void;
@@ -44,7 +45,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   popups,
   offscreenLanding,
   fpHints,
-  hitTimingBar,
+  stance,
+  onToggleStance,
   isHumanBlocking,
   returnToNetActive,
   onReturnToNetPress,
@@ -213,17 +215,18 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Ball-Approach Hit Timing Bar (shown when ball is close enough to swing) */}
-      {hitTimingBar.visible && !hud.serveMeterActive && (
-        <div className="hit-timing-wrap">
-          <div className="hit-timing-label">SWIPE TO HIT</div>
-          <div className="serve-meter-bar">
-            <div className="serve-meter-sweet" />
-            <div
-              className="serve-meter-cursor"
-              style={{ left: `${hitTimingBar.value * 100}%` }}
-            />
-          </div>
+      {/* Bottom-Left Stance Toggle (1st-Person auto-runner mode) */}
+      {cameraViewMode === 'first_person' && (
+        <div className="bottom-left-cluster">
+          <button
+            data-ui-interactive="true"
+            className={`stance-btn retro-circle-btn ${stance === 'close' ? 'is-close' : 'is-away'}`}
+            onClick={onToggleStance}
+            aria-label={`Play stance: ${stance}`}
+          >
+            <span className="stance-btn-title">{stance === 'close' ? 'CLOSE' : 'AWAY'}</span>
+            <span className="stance-btn-sub">STANCE</span>
+          </button>
         </div>
       )}
 

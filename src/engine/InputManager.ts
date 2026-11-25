@@ -50,8 +50,11 @@ export class InputManager {
   private rightStartY = 0;
   private rightStartTime = 0;
   private rightMaxDist = 0;
+  private swipeSamples: { x: number; y: number; t: number }[] = [];
+  private swipeFired = false;
   private blockHoldTimer: number | null = null;
   private isHoldingBlock = false;
+  public getSwipeTarget: (() => { x: number; y: number; radiusPx: number } | null) | null = null;
 
   // Desktop keyboard fallback
   private keys = new Set<string>();
@@ -107,15 +110,18 @@ export class InputManager {
       };
       this.updateLeftThumb(e.clientX, e.clientY);
     } else if ((this.fullScreenSwipe || e.clientX >= halfW) && this.rightPointerId === null) {
+      const now = performance.now();
       this.rightPointerId = e.pointerId;
       this.rightStartX = e.clientX;
       this.rightStartY = e.clientY;
-      this.rightStartTime = performance.now();
+      this.rightStartTime = now;
       this.rightMaxDist = 0;
+      this.swipeFired = false;
+      this.swipeSamples = [{ x: e.clientX, y: e.clientY, t: now }];
 
       // Tap & Hold to Block after 130ms if finger hasn't swiped far
       this.blockHoldTimer = window.setTimeout(() => {
-        if (this.rightPointerId !== null && this.rightMaxDist < 28) {
+        if (this.rightPointerId !== null && this.rightMaxDist < 28 && !this.swipeFired) {
           this.isHoldingBlock = true;
           this.callbacks.onBlockStart();
         }
@@ -142,15 +148,95 @@ export class InputManager {
     }
   }
 
+  private segmentHitsCircle(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    cx: number,
+    cy: number,
+    radius: number
+  ): boolean {
+    const abx = bx - ax;
+    const aby = by - ay;
+    const lenSq = abx * abx + aby * aby;
+    const t =
+      lenSq > 0.0001
+        ? Math.max(0, Math.min(1, ((cx - ax) * abx + (cy - ay) * aby) / lenSq))
+        : 0;
+    const px = ax + abx * t;
+    const py = ay + aby * t;
+    return Math.hypot(px - cx, py - cy) <= radius;
+  }
+
+  private emitBufferedSwipe(now: number, curX: number, curY: number): boolean {
+    let anchor = this.swipeSamples[0] ?? {
+      x: this.rightStartX,
+      y: this.rightStartY,
+      t: this.rightStartTime,
+    };
+    for (let i = 0; i < this.swipeSamples.length; i++) {
+      if (now - this.swipeSamples[i].t <= 140) {
+        anchor = this.swipeSamples[i];
+        break;
+      }
+    }
+    const dx = curX - anchor.x;
+    const dy = curY - anchor.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 16) return false;
+    const elapsedSec = Math.max(0.035, (now - anchor.t) / 1000);
+    this.swipeFired = true;
+    if (this.blockHoldTimer !== null) {
+      clearTimeout(this.blockHoldTimer);
+      this.blockHoldTimer = null;
+    }
+    this.callbacks.onSwipe({
+      dx,
+      dy,
+      distancePx: dist,
+      speedPxPerSec: dist / elapsedSec,
+      startX: anchor.x,
+      startY: anchor.y,
+    });
+    return true;
+  }
+
   private onPointerMove = (e: PointerEvent): void => {
     if (e.pointerId === this.leftPointerId) {
       this.updateLeftThumb(e.clientX, e.clientY);
     } else if (e.pointerId === this.rightPointerId) {
-      const dist = Math.hypot(e.clientX - this.rightStartX, e.clientY - this.rightStartY);
-      this.rightMaxDist = Math.max(this.rightMaxDist, dist);
+      const now = performance.now();
+      const prev = this.swipeSamples[this.swipeSamples.length - 1];
+      this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });
+      while (this.swipeSamples.length > 1 && now - this.swipeSamples[0].t > 300) {
+        this.swipeSamples.shift();
+      }
+
+      const distFromStart = Math.hypot(e.clientX - this.rightStartX, e.clientY - this.rightStartY);
+      this.rightMaxDist = Math.max(this.rightMaxDist, distFromStart);
       if (this.rightMaxDist > 30 && this.isHoldingBlock) {
         this.isHoldingBlock = false;
         this.callbacks.onBlockEnd();
+      }
+
+      if (!this.swipeFired && !this.isHoldingBlock) {
+        const target = this.getSwipeTarget?.() ?? null;
+        const intersected =
+          target !== null &&
+          distFromStart >= 20 &&
+          this.segmentHitsCircle(
+            prev ? prev.x : this.rightStartX,
+            prev ? prev.y : this.rightStartY,
+            e.clientX,
+            e.clientY,
+            target.x,
+            target.y,
+            target.radiusPx
+          );
+        if (intersected || distFromStart >= 55) {
+          this.emitBufferedSwipe(now, e.clientX, e.clientY);
+        }
       }
     }
   };
@@ -171,22 +257,12 @@ export class InputManager {
       if (this.isHoldingBlock) {
         this.isHoldingBlock = false;
         this.callbacks.onBlockEnd();
-      } else {
-        const dx = e.clientX - this.rightStartX;
-        const dy = e.clientY - this.rightStartY;
-        const dist = Math.hypot(dx, dy);
-        const elapsedSec = Math.max(0.04, (performance.now() - this.rightStartTime) / 1000);
-        if (dist >= 16) {
-          this.callbacks.onSwipe({
-            dx,
-            dy,
-            distancePx: dist,
-            speedPxPerSec: dist / elapsedSec,
-            startX: this.rightStartX,
-            startY: this.rightStartY,
-          });
-        }
+      } else if (!this.swipeFired) {
+        const now = performance.now();
+        this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });
+        this.emitBufferedSwipe(now, e.clientX, e.clientY);
       }
+      this.swipeSamples = [];
       this.rightPointerId = null;
     }
   };

@@ -250,6 +250,7 @@ export class MatchManager {
       const teammate = this.players.find(
         (p) => p.team === human.team && p.config.slotIndex !== human.config.slotIndex
       );
+      const contact = ShotResolver.evaluateContactTiming(ballPos, ballVel, human.position);
       const outcome = ShotResolver.resolveRallyShot(
         human,
         teammate,
@@ -258,7 +259,8 @@ export class MatchManager {
         swipe,
         nextTouches,
         isServeReceive || this.isFirstPossessionAfterServe,
-        camRight
+        camRight,
+        contact
       );
       if (!outcome) return;
 
@@ -300,7 +302,13 @@ export class MatchManager {
       this.possessionTeam = human.team;
       this.teamTouches = nextTouches;
       this.lastTouchPlayerIdx = human.config.slotIndex;
-      this.spawnPopup(ballPos, outcome.timing, outcome.timing);
+      const label =
+        outcome.timing === 'Bad'
+          ? 'SHANK!'
+          : outcome.shotType === 'SPIKE' && outcome.timing === 'Perfect'
+            ? 'SPIKE!'
+            : outcome.timing;
+      this.spawnPopup(ballPos, label, outcome.timing);
     }
   }
 
@@ -663,6 +671,14 @@ export class MatchManager {
     this.bannerTone = 'redo';
     this.serveAttempt = 1;
     this.spawnPopup(worldPos.clone().add(new THREE.Vector3(0, 1.3, 0)), 'INTERFERENCE!', 'Redo');
+  }
+
+  public showPopup(
+    worldPos: THREE.Vector3,
+    text: string,
+    quality: TimingPopup['quality']
+  ): void {
+    this.spawnPopup(worldPos, text, quality);
   }
 
   private spawnPopup(

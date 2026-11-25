@@ -3,11 +3,23 @@ import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import { CharacterController, AnimState } from './CharacterController';
 import { SwipeEvent } from './InputManager';
 
-export type TimingQuality = 'Early' | 'Perfect' | 'Late';
+export type TimingQuality = 'Early' | 'Perfect' | 'Late' | 'Bad';
+export type ContactZone = 'green' | 'yellow' | 'red';
+export type SwipeShotType = 'HIGH' | 'LOW' | 'SPIKE';
+
+export interface ContactTiming {
+  offset: number;
+  quality01: number;
+  zone: ContactZone;
+  timing: TimingQuality;
+  ringProgress: number;
+}
 
 export interface ShotOutcome {
   velocity: THREE.Vector3;
   timing: TimingQuality;
+  zone: ContactZone;
+  shotType: SwipeShotType;
   anim: AnimState;
   isAttackAtNet: boolean;
   triggeredDive: boolean;
@@ -84,18 +96,89 @@ export function predictBallIntercept(
 export const MAX_HITTING_HEIGHT = 1.98;
 
 export class ShotResolver {
+  public static evaluateContactTiming(
+    ballPos: THREE.Vector3,
+    ballVel: THREE.Vector3,
+    playerPos: THREE.Vector3
+  ): ContactTiming {
+    const SWEET_Y = 1.08;
+    const g = OFFICIAL_BALL.gravity;
+    const dx = playerPos.x - ballPos.x;
+    const dz = playerPos.z - ballPos.z;
+    const horizDist = Math.hypot(dx, dz);
+
+    const approachSpeed =
+      horizDist > 0.01 ? (ballVel.x * dx + ballVel.z * dz) / horizDist : 0;
+    let tHoriz = 0;
+    if (horizDist > 0.72 && approachSpeed > 0.45) {
+      tHoriz = Math.max(0, (horizDist - 0.65) / approachSpeed);
+    } else if (horizDist > 1.35) {
+      tHoriz = (horizDist - 1.25) * 0.25;
+    }
+
+    const disc = ballVel.y * ballVel.y - 2 * g * (SWEET_Y - ballPos.y);
+    let dtVert = 0;
+    if (ballPos.y > MAX_HITTING_HEIGHT) {
+      const tDrop = disc >= 0 ? (ballVel.y + Math.sqrt(disc)) / g : 0.32;
+      dtVert = Math.max(0.18, tDrop * 0.85);
+    } else if (ballPos.y >= 0.65) {
+      if (ballPos.y >= SWEET_Y) {
+        if (ballVel.y <= 0) {
+          dtVert = disc >= 0 ? (ballVel.y + Math.sqrt(disc)) / g : (ballPos.y - SWEET_Y) / 3.0;
+        } else {
+          // Rising through upper hitting window (legal to hit on the way up unless too high)
+          dtVert = (ballPos.y - SWEET_Y) * 0.28;
+        }
+      } else if (ballVel.y > 0) {
+        dtVert = ((SWEET_Y - ballPos.y) / Math.max(1.5, ballVel.y)) * 0.55;
+      } else {
+        dtVert = (ballPos.y - SWEET_Y) / Math.max(2.2, Math.abs(ballVel.y));
+      }
+    } else {
+      if (ballVel.y > 0.5) {
+        dtVert = ((SWEET_Y - ballPos.y) / Math.max(2.0, ballVel.y)) * 0.5;
+      } else {
+        dtVert = -((SWEET_Y - ballPos.y) / 2.6);
+      }
+    }
+
+    const signedDt = tHoriz > 0.08 ? Math.max(tHoriz, dtVert) : dtVert;
+    const outOfSweetRange =
+      ballPos.y > MAX_HITTING_HEIGHT + 0.08 ||
+      ballPos.y < 0.24 ||
+      horizDist > 1.75;
+
+    let zone: ContactZone;
+    let timing: TimingQuality;
+    if (outOfSweetRange) {
+      zone = 'red';
+      timing = 'Bad';
+    } else if (signedDt >= -0.095 && signedDt <= 0.115) {
+      zone = 'green';
+      timing = 'Perfect';
+    } else if (signedDt >= -0.22 && signedDt <= 0.25) {
+      zone = 'yellow';
+      timing = signedDt > 0 ? 'Early' : 'Late';
+    } else {
+      zone = 'red';
+      timing = 'Bad';
+    }
+
+    return {
+      offset: THREE.MathUtils.clamp(-signedDt / 0.35, -1, 1),
+      quality01: THREE.MathUtils.clamp(1 - Math.abs(signedDt) / 0.34, 0.05, 1),
+      zone,
+      timing,
+      ringProgress: THREE.MathUtils.clamp(0.5 + signedDt / 0.6, 0, 1),
+    };
+  }
+
   public static evaluateTiming(
     player: CharacterController,
     ballPos: THREE.Vector3,
-    _ballVel: THREE.Vector3
+    ballVel: THREE.Vector3
   ): TimingQuality {
-    const dist = Math.hypot(ballPos.x - player.position.x, ballPos.z - player.position.z);
-    if (ballPos.y > 1.82) return 'Early';
-    if (ballPos.y < 0.4) return 'Late';
-    if (dist <= 1.35 && ballPos.y >= 0.4 && ballPos.y <= 1.82) {
-      return 'Perfect';
-    }
-    return ballPos.y > 1.45 ? 'Early' : 'Late';
+    return this.evaluateContactTiming(ballPos, ballVel, player.position).timing;
   }
 
   public static resolveRallyShot(
@@ -106,156 +189,200 @@ export class ShotResolver {
     swipe: SwipeEvent,
     teamTouchesAfterThis: number,
     isFirstPossessionAfterServe: boolean,
-    camRight = new THREE.Vector3(1, 0, 0)
+    camRight = new THREE.Vector3(1, 0, 0),
+    precomputedTiming?: ContactTiming
   ): ShotOutcome | null {
     const horizDist = Math.hypot(ballPos.x - player.position.x, ballPos.z - player.position.z);
     const baseReach = player.getEffectiveReach();
     // Auto-dive ONLY when ball is slightly out of normal reach and player swipes
     const shouldAutoDive =
       horizDist > baseReach * 0.92 &&
-      horizDist <= baseReach + 0.78 &&
-      ballPos.y <= MAX_HITTING_HEIGHT;
+      horizDist <= baseReach + 0.85 &&
+      ballPos.y <= MAX_HITTING_HEIGHT + 0.12;
 
-    const maxReach = baseReach + (shouldAutoDive ? 0.78 : 0);
+    const maxReach = baseReach + (shouldAutoDive ? 0.85 : 0);
     // Can hit on the way up OR down unless ball is above hitting height!
-    if (horizDist > maxReach || ballPos.y > MAX_HITTING_HEIGHT) {
+    if (horizDist > maxReach || ballPos.y > MAX_HITTING_HEIGHT + 0.12) {
       return null;
     }
 
-    const timing = this.evaluateTiming(player, ballPos, ballVel);
-    const timingSpread = timing === 'Perfect' ? 0.03 : 0.11;
-    const shortMod = player.config.profile.stats.shortGame;
-    const powerMod = player.config.profile.stats.power;
+    const contact =
+      precomputedTiming ?? this.evaluateContactTiming(ballPos, ballVel, player.position);
+    const { timing, zone, offset } = contact;
 
     const swipeLen = Math.max(1, swipe.distancePx);
     const swipeDirX = swipe.dx / swipeLen;
-    const swipeDirY = swipe.dy / swipeLen; // negative = swipe UP
-    const powerRatio = THREE.MathUtils.clamp(swipe.speedPxPerSec / 1200, 0.35, 1.25);
+    const swipeDirY = swipe.dy / swipeLen; // negative = UP on screen
 
-    const distToNet = Math.hypot(player.position.x, player.position.z);
+    // Screen swipe angle from straight up: 0 = UP, pi/2 = SIDE, pi = DOWN
+    const angleFromUp = Math.atan2(Math.abs(swipe.dx), -swipe.dy);
+    const shotType: SwipeShotType =
+      angleFromUp <= Math.PI / 4
+        ? 'HIGH'
+        : angleFromUp >= Math.PI * 0.67
+          ? 'SPIKE'
+          : 'LOW';
+
+    // Swipe speed -> strength (0.25 soft touch .. 1.0 blistering whip)
+    const power01 = THREE.MathUtils.clamp((swipe.speedPxPerSec - 240) / 1400, 0.25, 1.0);
+    const powerMod = player.config.profile.stats.power;
+    const shortMod = player.config.profile.stats.shortGame;
+
+    const distToNet = Math.hypot(ballPos.x, ballPos.z);
     const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
 
-    const isSwipeUp = swipeDirY < -0.38;
-    const isSwipeDown = swipeDirY > 0.38;
+    const rightHoriz = camRight.clone().setY(0);
+    if (rightHoriz.lengthSq() > 0.0001) rightHoriz.normalize();
+    else rightHoriz.set(1, 0, 0);
 
-    // Lateral offset in camera-screen right direction
-    const lateralAim = camRight.clone().setY(0).normalize().multiplyScalar(swipeDirX * 0.22);
+    const toNet = new THREE.Vector3(-ballPos.x, 0, -ballPos.z);
+    if (toNet.lengthSq() > 0.0001) toNet.normalize();
+    else toNet.set(0, 0, -1);
 
-    // Helper: clean high pass/set toward teammate near net (peaks ~2.2-2.5 m, drops at y = 1.2 m!)
-    const buildSetToTeammate = (flightTime: number, anim: AnimState): ShotOutcome => {
-      const setTarget = teammate
-        ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.32)
-        : new THREE.Vector3(-player.position.x * 0.25, 0, -player.position.z * 0.25);
-      // Keep set outside the 1.00 m NHZ so hitter can legally spike it
-      const r = Math.hypot(setTarget.x, setTarget.z);
-      if (r < 1.35 && r > 0.01) {
-        setTarget.x = (setTarget.x / r) * 1.45;
-        setTarget.z = (setTarget.z / r) * 1.45;
-      }
-      setTarget.x += lateralAim.x * 1.5 + (Math.random() - 0.5) * timingSpread;
-      setTarget.z += lateralAim.z * 1.5 + (Math.random() - 0.5) * timingSpread;
-      setTarget.y = 1.22;
-      return {
-        velocity: computeBallisticVelocity(ballPos, setTarget, flightTime),
-        timing,
-        anim,
-        isAttackAtNet: false,
-        triggeredDive: shouldAutoDive,
-      };
-    };
+    // Bad/Red timing adds scatter; Yellow adds minor scatter
+    const scatterMag =
+      zone === 'green' ? 0.025 : zone === 'yellow' ? 0.09 / shortMod : 0.34 / shortMod;
+    const randScatterX = (Math.random() - 0.5) * 2 * scatterMag;
+    const randScatterZ = (Math.random() - 0.5) * 2 * scatterMag;
 
-    // On Touch 1 of serve receive, always dig/pass cleanly to teammate so player doesn't accidentally fault!
-    if (isFirstPossessionAfterServe && teamTouchesAfterThis === 1) {
-      return buildSetToTeammate(0.96, isSwipeUp ? 'hit_high' : 'hit_low');
-    }
+    // 1. HIGH HIT / SET (90-degree upward cone: +-45 deg around UP)
+    if (shotType === 'HIGH') {
+      if (teamTouchesAfterThis <= 2) {
+        const setTarget = teammate
+          ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.34)
+          : new THREE.Vector3(-player.position.x * 0.25, 0, -player.position.z * 0.25);
+        const r = Math.hypot(setTarget.x, setTarget.z);
+        if (r < 1.38 && r > 0.01) {
+          setTarget.x = (setTarget.x / r) * 1.48;
+          setTarget.z = (setTarget.z / r) * 1.48;
+        }
+        setTarget.addScaledVector(rightHoriz, swipeDirX * 0.65);
+        setTarget.x += randScatterX;
+        setTarget.z += randScatterZ;
+        setTarget.y = zone === 'red' ? 0.88 : 1.24;
 
-    // 1. Overhead Spike (Swipe Down close to net, or any Swipe Down on Touch 3)
-    // Reverse timing rule for spikes:
-    // - Late spike -> goes LOWER (sharper, flatter angle)
-    // - Early spike -> goes HIGH and straight up!
-    if (isSwipeDown && (teamTouchesAfterThis >= 3 || distToNet < 2.4)) {
-      const target = new THREE.Vector3(
-        lateralAim.x * 1.25 + (Math.random() - 0.5) * timingSpread,
-        netPlaneY - 0.015,
-        lateralAim.z * 1.25 + (Math.random() - 0.5) * timingSpread
-      );
-      if (timing === 'Early') {
-        // Early spike: high & straight up off the net
-        const velocity = computeBallisticVelocity(ballPos, target, 0.58);
-        velocity.x *= 0.45;
-        velocity.z *= 0.45;
-        velocity.y = Math.min(-3.8, velocity.y - 2.2);
+        // Higher arc from faster up-swipe; timing shifts arc (early = higher, late = flatter)
+        const baseFlight = THREE.MathUtils.lerp(0.86, 1.26, power01);
+        const timingShift = -offset * 0.14; // offset < 0 (early) => +, offset > 0 (late) => -
+        const flightTime = THREE.MathUtils.clamp(baseFlight + timingShift, 0.58, 1.42);
         return {
-          velocity,
+          velocity: computeBallisticVelocity(ballPos, setTarget, flightTime),
           timing,
-          anim: 'spike',
-          isAttackAtNet: true,
+          zone,
+          shotType,
+          anim: 'hit_high',
+          isAttackAtNet: false,
           triggeredDive: shouldAutoDive,
         };
       }
-      const baseFlight = THREE.MathUtils.lerp(0.2, 0.14, Math.min(1, powerRatio * powerMod)) + distToNet * 0.025;
-      const flightTime = timing === 'Late'
-        ? THREE.MathUtils.clamp(baseFlight * 0.78, 0.12, 0.24) // Late = lower, sharper angle
-        : THREE.MathUtils.clamp(baseFlight, 0.14, 0.28);
+
+      // Touch 3 HIGH lob onto the net
+      const lobTarget = new THREE.Vector3(
+        rightHoriz.x * swipeDirX * 0.26 + randScatterX,
+        netPlaneY + (zone === 'red' ? -0.04 : 0),
+        rightHoriz.z * swipeDirX * 0.26 + randScatterZ
+      );
+      const baseFlight = THREE.MathUtils.clamp(0.82 + power01 * 0.34 + distToNet * 0.08, 0.78, 1.42);
+      const flightTime = THREE.MathUtils.clamp(baseFlight - offset * 0.18, 0.55, 1.5);
+      return {
+        velocity: computeBallisticVelocity(ballPos, lobTarget, flightTime),
+        timing,
+        zone,
+        shotType,
+        anim: 'hit_high',
+        isAttackAtNet: true,
+        triggeredDive: shouldAutoDive,
+      };
+    }
+
+    // 2. SPIKE HIT (Downward cone: hard steep driven spike onto net)
+    if (shotType === 'SPIKE') {
+      // Later timing + low ball far from net pushes target lower onto front rim (harder to hit cleanly)
+      const lateDropPenalty = offset > 0.15 ? offset * 0.12 : 0;
+      const distPenalty = distToNet > 2.35 && ballPos.y < 0.9 ? 0.1 : 0;
+      const lateralOffset = swipeDirX * 0.36;
+      const depthAim = THREE.MathUtils.clamp((power01 - 0.5) * 0.22 - offset * 0.12, -0.26, 0.26);
+
+      const target = new THREE.Vector3(
+        rightHoriz.x * lateralOffset + toNet.x * depthAim + randScatterX * 1.15,
+        netPlaneY - 0.02 - lateDropPenalty - distPenalty,
+        rightHoriz.z * lateralOffset + toNet.z * depthAim + randScatterZ * 1.15
+      );
+
+      // Faster swipe = blistering faster downward flight; early keeps higher clearance
+      const desiredSpeed = THREE.MathUtils.lerp(7.8, 13.8, Math.min(1, power01 * powerMod));
+      const baseFlight = THREE.MathUtils.clamp(distToNet / desiredSpeed, 0.13, 0.38);
+      const flightTime =
+        offset < -0.25
+          ? THREE.MathUtils.clamp(baseFlight * 1.55, 0.22, 0.52) // early pops higher off net
+          : THREE.MathUtils.clamp(baseFlight * (1 - offset * 0.18), 0.12, 0.36);
+
       return {
         velocity: computeBallisticVelocity(ballPos, target, flightTime),
         timing,
+        zone,
+        shotType,
         anim: 'spike',
         isAttackAtNet: true,
         triggeredDive: shouldAutoDive,
       };
     }
 
-    // 2. Context-Aware Swipe Up
-    // Normal hit timing rule:
-    // - Late -> lower trajectory, lower chance of hitting cleanly, lower/flatter rebound
-    // - Early -> higher trajectory, safer net hit, higher rebound angle
-    if (isSwipeUp) {
-      const isFinalTouch = teamTouchesAfterThis >= 3;
-      const closeToNet = distToNet < 1.65;
+    // 3. LOW HIT (Side-to-side & angled swipes: angle smoothly drives lob-vs-low cut)
+    // elev01 ~ 1 near 46 deg up-side (lob toward net), ~ 0.45 at horizontal side-to-side (low cut), ~ 0.1 lower-side
+    const elev01 = THREE.MathUtils.clamp((-swipeDirY + 0.52) / 1.22, 0, 1);
+    const isAngledTeammateLob =
+      (isFirstPossessionAfterServe && teamTouchesAfterThis === 1) ||
+      (teamTouchesAfterThis <= 2 && elev01 > 0.62 && power01 < 0.72);
 
-      if (isFinalTouch || (!isFirstPossessionAfterServe && closeToNet && Math.abs(swipeDirX) < 0.4 && teamTouchesAfterThis === 2)) {
-        const missBias = timing === 'Perfect' ? 0 : timing === 'Late' ? (Math.random() - 0.5) * (0.42 / shortMod) : (Math.random() - 0.5) * (0.14 / shortMod);
-        const target = new THREE.Vector3(
-          lateralAim.x + missBias,
-          netPlaneY + (timing === 'Late' ? -0.02 : 0),
-          lateralAim.z + missBias
-        );
-        const baseT = THREE.MathUtils.clamp(0.92 + distToNet * 0.12, 0.92, 1.38);
-        const flightTime = timing === 'Early' ? baseT * 1.24 : timing === 'Late' ? baseT * 0.62 : baseT;
-        return {
-          velocity: computeBallisticVelocity(ballPos, target, flightTime),
-          timing,
-          anim: 'hit_high',
-          isAttackAtNet: true,
-          triggeredDive: shouldAutoDive,
-        };
-      }
-      const setT = timing === 'Early' ? 1.18 : timing === 'Late' ? 0.78 : 1.0;
-      return buildSetToTeammate(setT, 'hit_high');
-    }
-
-    // 3. Low-Angle / Sideways Swipe: Touch 3 -> Drive at Net; Touch 1-2 -> Pass/Set to Teammate
-    if (teamTouchesAfterThis >= 3 || (!isFirstPossessionAfterServe && distToNet < 1.85 && Math.abs(swipeDirX) < 0.5)) {
-      const lateMiss = timing === 'Late' ? (Math.random() - 0.5) * 0.36 : (Math.random() - 0.5) * timingSpread;
-      const target = new THREE.Vector3(
-        lateralAim.x * 1.15 + lateMiss,
-        netPlaneY + (timing === 'Late' ? -0.03 : 0),
-        lateralAim.z * 1.15 + lateMiss
+    if (isAngledTeammateLob) {
+      // Mid-height angled lob drifting toward net / teammate side (less reliable than pure UP set)
+      const anchor = teammate
+        ? teammate.position.clone().lerp(new THREE.Vector3(0, 0, 0), 0.52)
+        : new THREE.Vector3(0, 0, 0);
+      anchor.addScaledVector(rightHoriz, swipeDirX * 0.55);
+      anchor.x += randScatterX * 1.2;
+      anchor.z += randScatterZ * 1.2;
+      anchor.y = 0.96;
+      const lobFlight = THREE.MathUtils.clamp(
+        THREE.MathUtils.lerp(0.68, 0.96, elev01) - offset * 0.12,
+        0.5,
+        1.12
       );
-      const baseT = THREE.MathUtils.clamp(0.2 + distToNet * 0.055, 0.19, 0.4);
-      const flightTime = timing === 'Early' ? baseT * 1.45 : timing === 'Late' ? baseT * 0.78 : baseT;
       return {
-        velocity: computeBallisticVelocity(ballPos, target, flightTime),
+        velocity: computeBallisticVelocity(ballPos, anchor, lobFlight),
         timing,
+        zone,
+        shotType,
         anim: 'hit_low',
-        isAttackAtNet: true,
+        isAttackAtNet: false,
         triggeredDive: shouldAutoDive,
       };
     }
 
-    const passT = timing === 'Early' ? 1.08 : timing === 'Late' ? 0.72 : 0.92;
-    return buildSetToTeammate(passT, 'hit_low');
+    // Low driven cut / angled pass directly at the net
+    const lateralCut = swipeDirX * 0.38;
+    const target = new THREE.Vector3(
+      rightHoriz.x * lateralCut + toNet.x * (-offset * 0.08) + randScatterX,
+      netPlaneY + (zone === 'red' ? -0.05 : offset > 0.25 ? -0.025 : 0),
+      rightHoriz.z * lateralCut + toNet.z * (-offset * 0.08) + randScatterZ
+    );
+    const baseSpeed = THREE.MathUtils.lerp(6.4, 11.4, power01 * powerMod);
+    const rawT = distToNet / baseSpeed;
+    // Higher swipe angle -> slightly loftier lob; pure side-to-side + late -> flatter & lower
+    const arcScale = THREE.MathUtils.lerp(0.88, 1.55, elev01);
+    const timingScale = offset < 0 ? 1 + Math.abs(offset) * 0.28 : 1 - offset * 0.2;
+    const flightTime = THREE.MathUtils.clamp(rawT * arcScale * timingScale, 0.17, 0.78);
+
+    return {
+      velocity: computeBallisticVelocity(ballPos, target, flightTime),
+      timing,
+      zone,
+      shotType,
+      anim: 'hit_low',
+      isAttackAtNet: true,
+      triggeredDive: shouldAutoDive,
+    };
   }
 
   public static resolveServeToss(server: CharacterController): THREE.Vector3 {

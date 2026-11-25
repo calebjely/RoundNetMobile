@@ -303,6 +303,10 @@ body,
 .timing-popup.q-late {
   color: #fb923c;
 }
+.timing-popup.q-bad {
+  color: #ef4444;
+  font-size: 17px;
+}
 .timing-popup.q-fault {
   color: #f87171;
 }
@@ -334,6 +338,47 @@ body,
   flex-direction: column;
   gap: 14px;
   align-items: center;
+}
+
+.stance-btn {
+  width: 66px;
+  height: 66px;
+  flex-direction: column;
+  gap: 1px;
+  transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease;
+}
+
+.stance-btn.is-close {
+  border-color: #4ade80;
+  background: radial-gradient(circle at 34% 26%, #22c55e, #15803d 72%, #14532d);
+  box-shadow:
+    0 5px 0 #052e16,
+    0 8px 16px rgba(0, 0, 0, 0.55),
+    inset 0 2px 4px rgba(255, 255, 255, 0.35);
+}
+
+.stance-btn.is-away {
+  border-color: #fbbf24;
+  background: radial-gradient(circle at 34% 26%, #f59e0b, #d97706 72%, #92400e);
+  box-shadow:
+    0 5px 0 #451a03,
+    0 8px 16px rgba(0, 0, 0, 0.55),
+    inset 0 2px 4px rgba(255, 255, 255, 0.35);
+}
+
+.stance-btn-title {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+
+.stance-btn-sub {
+  font-size: 8px;
+  font-weight: 800;
+  opacity: 0.85;
+  letter-spacing: 0.06em;
+  line-height: 1;
 }
 
 .return-net-btn {
@@ -666,6 +711,7 @@ body,
   letter-spacing: 0.06em;
   z-index: 24;
   white-space: nowrap;
+  transition: left 0.08s linear, top 0.08s linear;
 }
 
 .fp-edge-badge.net-edge {
@@ -683,26 +729,4 @@ body,
 .fp-edge-arrow {
   display: inline-block;
   font-size: 12px;
-}
-
-.hit-timing-wrap {
-  position: fixed;
-  bottom: max(44px, calc(env(safe-area-inset-bottom) + 34px));
-  left: 50%;
-  transform: translateX(-50%);
-  width: 220px;
-  background: rgba(15, 23, 42, 0.82);
-  padding: 7px 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  z-index: 22;
-}
-
-.hit-timing-label {
-  font-size: 10px;
-  font-weight: 900;
-  color: #38bdf8;
-  text-align: center;
-  margin-bottom: 5px;
-  letter-spacing: 0.06em;
 }

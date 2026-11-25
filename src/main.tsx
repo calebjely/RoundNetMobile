@@ -21,6 +21,7 @@ import {
   OffscreenLandingHint,
   SceneManager,
 } from './engine/SceneManager';
+import { ShotResolver } from './engine/ShotResolver';
 import { CalibratorTab } from './ui/CalibratorPanel';
 import { GameHUD } from './ui/GameHUD';
 import './styles.css';
@@ -52,10 +53,7 @@ const App: React.FC = () => {
     netEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#facc15' },
     partnerEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' },
   });
-  const [hitTimingBar, setHitTimingBar] = useState<{ visible: boolean; value: number }>({
-    visible: false,
-    value: 0.5,
-  });
+  const [stance, setStance] = useState<'close' | 'away'>('close');
   const [returnToNetActive, setReturnToNetActive] = useState(false);
   const [calibrateMode, setCalibrateMode] = useState(
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
@@ -76,6 +74,7 @@ const App: React.FC = () => {
 
   const physicsSpeedRef = useRef<number>(initialSaved.current.physicsSpeed);
   const playerSpeedRef = useRef<number>(initialSaved.current.playerSpeed);
+  const stanceRef = useRef<'close' | 'away'>('close');
   const saveTimerRef = useRef<number | null>(null);
 
   const engineRef = useRef<{
@@ -191,7 +190,22 @@ const App: React.FC = () => {
           const camRight = new THREE.Vector3()
             .crossVectors(camFwd, new THREE.Vector3(0, 1, 0))
             .normalize();
+          const beforePhase = matchMgr.phase;
+          const beforeTouches = matchMgr.teamTouches;
           matchMgr.handleHumanSwipe(swipe, camRight);
+          const didHit =
+            matchMgr.phase !== beforePhase || matchMgr.teamTouches !== beforeTouches;
+          if (
+            !didHit &&
+            (beforePhase === 'RALLY_LIVE' ||
+              (beforePhase === 'SERVE_IN_FLIGHT' && matchMgr.serveReboundedOffNet))
+          ) {
+            const bPos = physics.getBallPosition();
+            const dist = Math.hypot(bPos.x - human.position.x, bPos.z - human.position.z);
+            if (dist <= 4.2) {
+              matchMgr.showPopup(bPos, 'MISS!', 'Bad');
+            }
+          }
         },
         onBlockStart: () => {
           sceneMgr.skipIntroSpin();
@@ -212,6 +226,20 @@ const App: React.FC = () => {
       });
       inputMgr.enabled = !initialCalibrate;
       inputMgr.fullScreenSwipe = sceneMgr.getCameraViewMode() === 'first_person';
+      inputMgr.getSwipeTarget = () => {
+        const isHumansTurn =
+          (matchMgr.phase === 'SERVE_IN_FLIGHT' &&
+            matchMgr.serveReboundedOffNet &&
+            human.team !== matchMgr.getServingTeam()) ||
+          (matchMgr.phase === 'RALLY_LIVE' &&
+            matchMgr.possessionTeam === human.team &&
+            matchMgr.lastTouchPlayerIdx !== human.config.slotIndex);
+        if (!isHumansTurn) return null;
+        const bPos = physics.getBallPosition();
+        const dist = Math.hypot(bPos.x - human.position.x, bPos.z - human.position.z);
+        if (dist > 3.6) return null;
+        return sceneMgr.getBallScreenTarget(bPos);
+      };
 
       engineRef.current = {
         sceneMgr,
@@ -279,7 +307,7 @@ const App: React.FC = () => {
 
         if (sceneMgr.getCameraViewMode() === 'first_person') {
           // 1st-Person Auto-Runner: character automatically runs & positions; user only swipes!
-          bots.updateHumanAutoMove(simDt, plrSpd);
+          bots.updateHumanAutoMove(simDt, plrSpd, stanceRef.current);
         } else {
           if (engineRef.current?.returnToNet && deflection < 0.05) {
             const curR = Math.hypot(human.position.x, human.position.z);
@@ -353,6 +381,25 @@ const App: React.FC = () => {
           teamMeta.primary,
           teammate?.position
         );
+
+        const isHumansTurn =
+          (matchMgr.phase === 'SERVE_IN_FLIGHT' &&
+            matchMgr.serveReboundedOffNet &&
+            human.team !== matchMgr.getServingTeam()) ||
+          (matchMgr.phase === 'RALLY_LIVE' &&
+            matchMgr.possessionTeam === human.team &&
+            matchMgr.lastTouchPlayerIdx !== human.config.slotIndex);
+        const distToBall = Math.hypot(
+          ballPos.x - human.position.x,
+          ballPos.z - human.position.z
+        );
+        if (isHumansTurn && distToBall <= 3.6 && ballPos.y > 0.14) {
+          const contact = ShotResolver.evaluateContactTiming(ballPos, ballVel, human.position);
+          sceneMgr.updateTimingRing(true, ballPos, contact.ringProgress, contact.zone);
+        } else {
+          sceneMgr.updateTimingRing(false, ballPos, 1, 'yellow');
+        }
+
         sceneMgr.updateFirstPersonArm(rawDt);
 
         const tracked = players.map((p) => p.position);
@@ -361,7 +408,7 @@ const App: React.FC = () => {
         sceneMgr.render();
 
         hudSyncAccum += rawDt;
-        if (hudSyncAccum >= 0.05) {
+        if (hudSyncAccum >= 0.033) {
           hudSyncAccum = 0;
           setHud(matchMgr.getHUDState());
           setJoystick({ ...inputMgr.joystickState });
@@ -369,26 +416,6 @@ const App: React.FC = () => {
           setOffscreenLanding(sceneMgr.getOffscreenLandingHint());
           setFpHints(sceneMgr.getFirstPersonHints());
           setIsHumanBlocking(human.isBlocking);
-
-          // Hit timing bar: visible when it's human's team's turn & ball is approaching within 3.6 m
-          const isHumansTurn =
-            (matchMgr.phase === 'SERVE_IN_FLIGHT' &&
-              matchMgr.serveReboundedOffNet &&
-              human.team !== matchMgr.getServingTeam()) ||
-            (matchMgr.phase === 'RALLY_LIVE' &&
-              matchMgr.possessionTeam === human.team &&
-              matchMgr.lastTouchPlayerIdx !== human.config.slotIndex);
-          const distToBall = Math.hypot(
-            ballPos.x - human.position.x,
-            ballPos.z - human.position.z
-          );
-          if (isHumansTurn && distToBall <= 3.6) {
-            // Map distance + height to 0 (Early) -> 0.5 (Perfect) -> 1.0 (Late)
-            const val = THREE.MathUtils.clamp(1.0 - distToBall / 3.4, 0.04, 0.96);
-            setHitTimingBar({ visible: true, value: val });
-          } else {
-            setHitTimingBar({ visible: false, value: 0.5 });
-          }
         }
 
         rafId = requestAnimationFrame(tick);
@@ -451,7 +478,12 @@ const App: React.FC = () => {
           popups={popups}
           offscreenLanding={offscreenLanding}
           fpHints={fpHints}
-          hitTimingBar={hitTimingBar}
+          stance={stance}
+          onToggleStance={() => {
+            const next = stanceRef.current === 'close' ? 'away' : 'close';
+            stanceRef.current = next;
+            setStance(next);
+          }}
           isHumanBlocking={isHumanBlocking}
           returnToNetActive={returnToNetActive}
           onReturnToNetPress={(active) => {

@@ -31,6 +31,44 @@ export interface FirstPersonHints {
   partnerEdge: OffscreenLandingHint;
 }
 
+function smoothDampScalar(
+  current: number,
+  target: number,
+  vel: { v: number },
+  smoothTime: number,
+  dt: number,
+  maxSpeed = Infinity
+): number {
+  const st = Math.max(0.0001, smoothTime);
+  const omega = 2 / st;
+  const x = omega * dt;
+  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  let change = current - target;
+  const maxChange = maxSpeed * st;
+  change = THREE.MathUtils.clamp(change, -maxChange, maxChange);
+  const clampedTarget = current - change;
+  const temp = (vel.v + omega * change) * dt;
+  vel.v = (vel.v - omega * temp) * exp;
+  let output = clampedTarget + (change + temp) * exp;
+  if (target - current > 0 === output > target) {
+    output = target;
+    vel.v = (output - target) / Math.max(1e-5, dt);
+  }
+  return output;
+}
+
+function smoothDampAngle(
+  current: number,
+  target: number,
+  vel: { v: number },
+  smoothTime: number,
+  dt: number
+): number {
+  let delta = ((target - current + Math.PI) % (Math.PI * 2)) - Math.PI;
+  if (delta < -Math.PI) delta += Math.PI * 2;
+  return smoothDampScalar(current, current + delta, vel, smoothTime, dt);
+}
+
 export class SceneManager {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
@@ -82,12 +120,28 @@ export class SceneManager {
   private currentCamPos = new THREE.Vector3();
   private currentCamTarget = new THREE.Vector3();
 
+  // Critically damped 1st-person gimbal camera state
+  private fpInit = false;
+  private fpEyePos = new THREE.Vector3();
+  private fpEyeVelX = { v: 0 };
+  private fpEyeVelY = { v: 0 };
+  private fpEyeVelZ = { v: 0 };
+  private fpYaw = 0;
+  private fpYawVel = { v: 0 };
+  private fpPitch = 0;
+  private fpPitchVel = { v: 0 };
+
   private netHitDotMesh!: THREE.Mesh;
   private netArrowGroup!: THREE.Group;
   private landingRingMesh!: THREE.Mesh;
   private landingRingMat!: THREE.MeshBasicMaterial;
   private landingInnerMesh!: THREE.Mesh;
   private landingInnerMat!: THREE.MeshBasicMaterial;
+  private timingRingGroup!: THREE.Group;
+  private timingOuterMesh!: THREE.Mesh;
+  private timingOuterMat!: THREE.MeshBasicMaterial;
+  private timingTargetMesh!: THREE.Mesh;
+  private timingTargetMat!: THREE.MeshBasicMaterial;
   private offscreenLandingHint: OffscreenLandingHint = {
     visible: false,
     screenX: 0,
@@ -170,6 +224,7 @@ export class SceneManager {
     this.scene.add(this.netGroup);
     this.createNetDirectionArrow();
     this.createLandingCircle();
+    this.createTimingRing();
     this.createFirstPersonArm();
     this.ballMesh = this.createOfficialBall();
     this.scene.add(this.ballMesh);
@@ -218,10 +273,14 @@ export class SceneManager {
         opacity,
         side: THREE.DoubleSide,
         depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = 0.01;
+      mesh.position.y = 0.012;
+      mesh.renderOrder = 1;
       return mesh;
     };
 
@@ -242,13 +301,17 @@ export class SceneManager {
       opacity: 0.24,
       side: THREE.DoubleSide,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
     for (let i = 0; i < 4; i++) {
       const angle = Math.PI / 4 + (i * Math.PI) / 2;
       const line = new THREE.Mesh(lineGeo, lineMat);
       line.rotation.x = -Math.PI / 2;
       line.rotation.z = -angle;
-      line.position.set(Math.sin(angle) * midR, 0.01, Math.cos(angle) * midR);
+      line.position.set(Math.sin(angle) * midR, 0.012, Math.cos(angle) * midR);
+      line.renderOrder = 1;
       this.scene.add(line);
     }
   }
@@ -714,12 +777,17 @@ export class SceneManager {
     };
   }
 
-  private projectEdgeIndicator(worldPos: THREE.Vector3, teamColor: string): OffscreenLandingHint {
+  private projectEdgeIndicator(
+    worldPos: THREE.Vector3,
+    teamColor: string,
+    wasVisible: boolean
+  ): OffscreenLandingHint {
     const proj = worldPos.clone().project(this.camera);
     const behind = proj.z > 1;
     let nx = behind ? -proj.x : proj.x;
     let ny = behind ? -proj.y : proj.y;
-    const isOffCenter = behind || Math.abs(nx) > 0.72 || Math.abs(ny) > 0.72;
+    const threshold = wasVisible ? 0.64 : 0.78;
+    const isOffCenter = behind || Math.abs(nx) > threshold || Math.abs(ny) > threshold;
     if (!isOffCenter) {
       return { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor };
     }
@@ -796,10 +864,14 @@ export class SceneManager {
       opacity: 0.92,
       side: THREE.DoubleSide,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
     const ring = new THREE.Mesh(outerGeo, this.landingRingMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.018;
+    ring.renderOrder = 2;
     ring.visible = false;
     this.landingRingMesh = ring;
     this.scene.add(ring);
@@ -813,12 +885,95 @@ export class SceneManager {
       opacity: 0.65,
       side: THREE.DoubleSide,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
     this.landingInnerMesh = new THREE.Mesh(innerGeo, this.landingInnerMat);
     this.landingInnerMesh.rotation.x = -Math.PI / 2;
     this.landingInnerMesh.position.y = 0.017;
+    this.landingInnerMesh.renderOrder = 2;
     this.landingInnerMesh.visible = false;
     this.scene.add(this.landingInnerMesh);
+  }
+
+  private createTimingRing(): void {
+    const group = new THREE.Group();
+    group.visible = false;
+    group.renderOrder = 6;
+
+    // Inner sweet-spot reference ring snugly around the ball
+    this.timingTargetMat = new THREE.MeshBasicMaterial({
+      color: 0x4ade80,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: false,
+    });
+    this.timingTargetMesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.088, 0.106, 48),
+      this.timingTargetMat
+    );
+    this.timingTargetMesh.renderOrder = 6;
+    group.add(this.timingTargetMesh);
+
+    // Outer shrinking approach ring around the ball
+    this.timingOuterMat = new THREE.MeshBasicMaterial({
+      color: 0xfacc15,
+      transparent: true,
+      opacity: 0.92,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: false,
+    });
+    this.timingOuterMesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.088, 0.114, 48),
+      this.timingOuterMat
+    );
+    this.timingOuterMesh.renderOrder = 7;
+    group.add(this.timingOuterMesh);
+
+    this.timingRingGroup = group;
+    this.scene.add(group);
+  }
+
+  public updateTimingRing(
+    visible: boolean,
+    ballPos: THREE.Vector3,
+    ringProgress: number,
+    zone: 'green' | 'yellow' | 'red'
+  ): void {
+    if (!visible || this.calibrateMode || this.isIntroSpinning()) {
+      this.timingRingGroup.visible = false;
+      return;
+    }
+    this.timingRingGroup.visible = true;
+    this.timingRingGroup.position.copy(ballPos);
+    this.timingRingGroup.quaternion.copy(this.camera.quaternion);
+
+    const scale =
+      ringProgress >= 0.5
+        ? THREE.MathUtils.lerp(1.0, 2.55, (ringProgress - 0.5) * 2)
+        : THREE.MathUtils.lerp(0.56, 1.0, ringProgress * 2);
+    this.timingOuterMesh.scale.setScalar(scale);
+
+    const hex = zone === 'green' ? 0x4ade80 : zone === 'yellow' ? 0xfacc15 : 0xf87171;
+    this.timingOuterMat.color.setHex(hex);
+    this.timingTargetMat.color.setHex(zone === 'green' ? 0x4ade80 : hex);
+    this.timingTargetMat.opacity = zone === 'green' ? 0.9 : zone === 'yellow' ? 0.45 : 0.3;
+  }
+
+  public getBallScreenTarget(
+    ballPos: THREE.Vector3
+  ): { x: number; y: number; radiusPx: number } | null {
+    const proj = ballPos.clone().project(this.camera);
+    if (proj.z > 1) return null;
+    const x = (proj.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-proj.y * 0.5 + 0.5) * window.innerHeight;
+    const dist = this.camera.position.distanceTo(ballPos);
+    const radiusPx = THREE.MathUtils.clamp(210 / Math.max(1.2, dist), 58, 102);
+    return { x, y, radiusPx };
   }
 
   public getOffscreenLandingHint(): OffscreenLandingHint {
@@ -843,12 +998,14 @@ export class SceneManager {
     if (this.cameraViewMode === 'first_person' && !this.calibrateMode) {
       this.fpHints.netEdge = this.projectEdgeIndicator(
         new THREE.Vector3(0, 0.25, 0),
-        '#facc15'
+        '#facc15',
+        this.fpHints.netEdge.visible
       );
       this.fpHints.partnerEdge = partnerPos
         ? this.projectEdgeIndicator(
             new THREE.Vector3(partnerPos.x, 1.35, partnerPos.z),
-            '#60a5fa'
+            '#60a5fa',
+            this.fpHints.partnerEdge.visible
           )
         : { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' };
     } else {
@@ -1024,6 +1181,7 @@ export class SceneManager {
     };
     this.introSpinDuration = durations[this.introStyle];
     this.introSpinElapsed = 0;
+    this.fpInit = false;
   }
 
   public setIntroStyle(style: IntroCameraStyle): void {
@@ -1125,7 +1283,12 @@ export class SceneManager {
 
   public setCameraViewMode(mode: 'pressbox' | 'first_person'): void {
     this.cameraViewMode = mode;
+    this.fpInit = false;
     this.skipIntroSpin();
+  }
+
+  public resetFirstPersonCamera(): void {
+    this.fpInit = false;
   }
 
   public getCameraViewMode(): 'pressbox' | 'first_person' {
@@ -1134,6 +1297,7 @@ export class SceneManager {
 
   public setCalibrateMode(enabled: boolean): void {
     this.calibrateMode = enabled;
+    this.fpInit = false;
     this.skipIntroSpin();
     this.netPointers.clear();
     this.netPrevPinchDist = 0;
@@ -1362,17 +1526,78 @@ export class SceneManager {
     }
 
     if (this.cameraViewMode === 'first_person') {
-      const eyePos = new THREE.Vector3(humanPos.x, 1.66, humanPos.z);
-      // 1st-person sight automatically follows the ball!
-      const desiredTarget = ballPos.clone();
-      const lookDir = desiredTarget.clone().sub(eyePos).setY(0);
-      if (lookDir.lengthSq() > 0.001) {
-        lookDir.normalize();
-        eyePos.addScaledVector(lookDir, 0.16);
+      const lookVec = ballPos.clone().sub(new THREE.Vector3(humanPos.x, 1.66, humanPos.z));
+      const horizLook = new THREE.Vector3(lookVec.x, 0, lookVec.z);
+      if (horizLook.lengthSq() < 0.04) {
+        // Fallback toward net if ball is directly overhead/at eye center
+        horizLook.set(-humanPos.x, 0, -humanPos.z);
       }
-      const fpRate = 1 - Math.exp(-dt * 11);
-      this.currentCamPos.lerp(eyePos, fpRate);
-      this.currentCamTarget.lerp(desiredTarget, fpRate);
+      if (horizLook.lengthSq() > 0.0001) {
+        horizLook.normalize();
+      } else {
+        horizLook.set(0, 0, -1);
+      }
+
+      const desiredEye = new THREE.Vector3(humanPos.x, 1.66, humanPos.z).addScaledVector(
+        horizLook,
+        0.16
+      );
+      const aimVec = ballPos.clone().sub(desiredEye);
+      const horizDist = Math.max(0.25, Math.hypot(aimVec.x, aimVec.z));
+      const desiredYaw = Math.atan2(aimVec.x, aimVec.z);
+      const desiredPitch = THREE.MathUtils.clamp(Math.atan2(aimVec.y, horizDist), -1.05, 0.92);
+
+      if (!this.fpInit) {
+        this.fpEyePos.copy(desiredEye);
+        this.fpEyeVelX.v = 0;
+        this.fpEyeVelY.v = 0;
+        this.fpEyeVelZ.v = 0;
+        this.fpYaw = desiredYaw;
+        this.fpYawVel.v = 0;
+        this.fpPitch = desiredPitch;
+        this.fpPitchVel.v = 0;
+        this.fpInit = true;
+      } else {
+        const clampedDt = Math.min(dt, 0.05);
+        this.fpEyePos.x = smoothDampScalar(
+          this.fpEyePos.x,
+          desiredEye.x,
+          this.fpEyeVelX,
+          0.13,
+          clampedDt
+        );
+        this.fpEyePos.y = smoothDampScalar(
+          this.fpEyePos.y,
+          desiredEye.y,
+          this.fpEyeVelY,
+          0.14,
+          clampedDt
+        );
+        this.fpEyePos.z = smoothDampScalar(
+          this.fpEyePos.z,
+          desiredEye.z,
+          this.fpEyeVelZ,
+          0.13,
+          clampedDt
+        );
+        this.fpYaw = smoothDampAngle(this.fpYaw, desiredYaw, this.fpYawVel, 0.15, clampedDt);
+        this.fpPitch = smoothDampScalar(
+          this.fpPitch,
+          desiredPitch,
+          this.fpPitchVel,
+          0.17,
+          clampedDt
+        );
+      }
+
+      const cosP = Math.cos(this.fpPitch);
+      const lookDir = new THREE.Vector3(
+        Math.sin(this.fpYaw) * cosP,
+        Math.sin(this.fpPitch),
+        Math.cos(this.fpYaw) * cosP
+      );
+      this.currentCamPos.copy(this.fpEyePos);
+      this.currentCamTarget.copy(this.fpEyePos).add(lookDir);
       this.camera.position.copy(this.currentCamPos);
       this.camera.lookAt(this.currentCamTarget);
       return;

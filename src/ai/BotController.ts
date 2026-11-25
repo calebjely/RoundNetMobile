@@ -32,9 +32,9 @@ export class BotController {
       this.match.possessionTeam !== this.prevPossessionTeam ||
       this.match.teamTouches !== this.prevTeamTouches
     ) {
-      // Realistic human-like 0.15s reaction window when possession flips off the net
+      // Realistic human-like ~0.28s reaction window when possession flips off the net
       if (this.match.teamTouches === 0 && this.match.phase === 'RALLY_LIVE') {
-        this.reactionDelay = 0.16;
+        this.reactionDelay = 0.28;
       }
       this.prevPossessionTeam = this.match.possessionTeam;
       this.prevTeamTouches = this.match.teamTouches;
@@ -57,7 +57,11 @@ export class BotController {
   /**
    * Auto-moves the human player in 1st-Person Auto-Runner mode (never auto-hits; user swipes to hit).
    */
-  public updateHumanAutoMove(dt: number, playerSpeedMult = 1.0): void {
+  public updateHumanAutoMove(
+    dt: number,
+    playerSpeedMult = 1.0,
+    stance: 'close' | 'away' = 'close'
+  ): void {
     const human = this.players.find((p) => p.isHuman);
     if (!human) return;
     const ballPos = this.physics.getBallPosition();
@@ -71,7 +75,8 @@ export class BotController {
       ballVel,
       this.match.phase,
       intercept,
-      true
+      true,
+      stance
     );
   }
 
@@ -83,7 +88,8 @@ export class BotController {
     _ballVel: THREE.Vector3,
     phase: string,
     intercept: { x: number; z: number; time: number },
-    movementOnly: boolean
+    movementOnly: boolean,
+    stance: 'close' | 'away' = 'close'
   ): void {
       const idx = bot.config.slotIndex;
       const cd = Math.max(0, (this.hitCooldowns.get(idx) ?? 0) - dt);
@@ -139,7 +145,9 @@ export class BotController {
 
               if (distToIntercept > 0.25) {
                 moveIntent.set(dx / distToIntercept, dz / distToIntercept);
-                deflection = distToIntercept > 1.3 ? 0.86 : 0.5;
+                deflection = movementOnly
+                  ? distToIntercept > 1.2 ? 0.88 : 0.52
+                  : distToIntercept > 1.3 ? 0.68 : 0.42;
               }
             }
 
@@ -149,7 +157,7 @@ export class BotController {
                 ballPos.x - bot.position.x,
                 ballPos.z - bot.position.z
               );
-              const reach = bot.getEffectiveReach() * 0.72;
+              const reach = bot.getEffectiveReach() * 0.58;
               const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= MAX_HITTING_HEIGHT;
 
               if (
@@ -164,11 +172,11 @@ export class BotController {
               }
             }
           } else {
-            this.moveToAttackReadySpot(bot, moveIntent);
+            this.moveToAttackReadySpot(bot, moveIntent, bot.isHuman ? stance : undefined);
             deflection = moveIntent.length() > 0.1 ? 0.55 : 0;
           }
         } else {
-          this.moveToDefensiveSpot(bot, ballPos, moveIntent);
+          this.moveToDefensiveSpot(bot, ballPos, moveIntent, bot.isHuman ? stance : undefined);
           for (const other of this.players) {
             if (other.team === bot.team) continue;
             const odx = bot.position.x - other.position.x;
@@ -189,7 +197,8 @@ export class BotController {
 
       const isPreServe =
         phase === 'SERVE_WAIT_TOSS' || phase === 'SERVE_METER_ACTIVE';
-      bot.update(dt, moveIntent, deflection, isPreServe, playerSpeedMult);
+      const effectiveSpeed = movementOnly ? playerSpeedMult : playerSpeedMult * 0.82;
+      bot.update(dt, moveIntent, deflection, isPreServe, effectiveSpeed);
   }
 
   private moveToStartSpot(
@@ -208,12 +217,14 @@ export class BotController {
 
   private moveToAttackReadySpot(
     bot: CharacterController,
-    outIntent: THREE.Vector2
+    outIntent: THREE.Vector2,
+    stance?: 'close' | 'away'
   ): void {
-    // Move to ~1.65 m from net in the bot's quarter so a teammate set drops cleanly for a spike
+    // Move to attack-ready spot in quarter (Close/Away adjusts human auto-runner depth)
+    const radius = stance === 'away' ? 2.15 : stance === 'close' ? 1.42 : 1.65;
     const angle = bot.config.quarterCenterAngle;
-    const tx = Math.sin(angle) * 1.65;
-    const tz = Math.cos(angle) * 1.65;
+    const tx = Math.sin(angle) * radius;
+    const tz = Math.cos(angle) * radius;
     const dx = tx - bot.position.x;
     const dz = tz - bot.position.z;
     const dist = Math.hypot(dx, dz);
@@ -225,7 +236,8 @@ export class BotController {
   private moveToDefensiveSpot(
     bot: CharacterController,
     ballPos: THREE.Vector3,
-    outIntent: THREE.Vector2
+    outIntent: THREE.Vector2,
+    stance?: 'close' | 'away'
   ): void {
     // Position ~2.7 m from net biased opposite the ball so defenders cover spikes
     const ballAngle = Math.atan2(ballPos.x, ballPos.z);
@@ -236,8 +248,9 @@ export class BotController {
     while (diff < -Math.PI) diff += Math.PI * 2;
     const defAngle = baseAngle - Math.sign(diff) * 0.18;
 
-    const tx = Math.sin(defAngle) * 2.75;
-    const tz = Math.cos(defAngle) * 2.75;
+    const radius = stance === 'away' ? 3.2 : stance === 'close' ? 2.2 : 2.75;
+    const tx = Math.sin(defAngle) * radius;
+    const tz = Math.cos(defAngle) * radius;
     const dx = tx - bot.position.x;
     const dz = tz - bot.position.z;
     const dist = Math.hypot(dx, dz);

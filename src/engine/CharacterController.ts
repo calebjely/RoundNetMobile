@@ -243,10 +243,14 @@ export class CharacterController {
         opacity: this.isHuman ? 0.9 : 0.65,
         side: THREE.DoubleSide,
         depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       })
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.015;
+    ring.renderOrder = 2;
     this.root.add(ring);
 
     if (this.isHuman) {
@@ -259,10 +263,14 @@ export class CharacterController {
           opacity: 0.55,
           side: THREE.DoubleSide,
           depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
         })
       );
       track.rotation.x = -Math.PI / 2;
       track.position.y = 0.016;
+      track.renderOrder = 2;
       this.root.add(track);
 
       // Filling stamina arc ring (zero-GC via setDrawRange)
@@ -273,10 +281,14 @@ export class CharacterController {
         opacity: 0.95,
         side: THREE.DoubleSide,
         depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       });
       this.staminaRingMesh = new THREE.Mesh(staminaGeo, this.staminaRingMat);
       this.staminaRingMesh.rotation.x = -Math.PI / 2;
       this.staminaRingMesh.position.y = 0.018;
+      this.staminaRingMesh.renderOrder = 2;
       this.root.add(this.staminaRingMesh);
     }
   }
