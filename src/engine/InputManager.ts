@@ -149,10 +149,9 @@ export class InputManager {
       const target = this.getSwipeTarget?.() ?? null;
       this.startedOnBall =
         target !== null &&
-        Math.hypot(e.clientX - target.x, e.clientY - target.y) <=
-          Math.max(target.radiusPx * 1.25, 112);
+        Math.hypot(e.clientX - target.x, e.clientY - target.y) <= target.radiusPx;
       this.swipeVisual = {
-        active: this.startedOnBall || (target?.inRange ?? false),
+        active: this.startedOnBall,
         startX: e.clientX,
         startY: e.clientY,
         curX: e.clientX,
@@ -188,27 +187,6 @@ export class InputManager {
     } else {
       this.moveVector.set(0, 0);
     }
-  }
-
-  private segmentHitsCircle(
-    ax: number,
-    ay: number,
-    bx: number,
-    by: number,
-    cx: number,
-    cy: number,
-    radius: number
-  ): boolean {
-    const abx = bx - ax;
-    const aby = by - ay;
-    const lenSq = abx * abx + aby * aby;
-    const t =
-      lenSq > 0.0001
-        ? Math.max(0, Math.min(1, ((cx - ax) * abx + (cy - ay) * aby) / lenSq))
-        : 0;
-    const px = ax + abx * t;
-    const py = ay + aby * t;
-    return Math.hypot(px - cx, py - cy) <= radius;
   }
 
   private emitBufferedSwipe(now: number, curX: number, curY: number): boolean {
@@ -249,7 +227,6 @@ export class InputManager {
       this.updateLeftThumb(e.clientX, e.clientY);
     } else if (e.pointerId === this.rightPointerId) {
       const now = performance.now();
-      const prev = this.swipeSamples[this.swipeSamples.length - 1];
       this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });
       while (this.swipeSamples.length > 1 && now - this.swipeSamples[0].t > 300) {
         this.swipeSamples.shift();
@@ -270,23 +247,8 @@ export class InputManager {
           this.swipeVisual.inRange = target?.inRange ?? false;
         }
         if (target && !target.allowAnywhere) {
-          // Responsive hitting when in range: touch-ball drag, swipe-through-ball, OR natural swipe anywhere
-          const hitOnBall = this.startedOnBall && target.inRange && distFromStart >= 36;
-          const swipedThroughBall =
-            !this.startedOnBall &&
-            target.inRange &&
-            distFromStart >= 28 &&
-            this.segmentHitsCircle(
-              prev ? prev.x : this.rightStartX,
-              prev ? prev.y : this.rightStartY,
-              e.clientX,
-              e.clientY,
-              target.x,
-              target.y,
-              Math.max(target.radiusPx * 1.25, 96)
-            );
-          const naturalSwipe = !this.startedOnBall && target.inRange && distFromStart >= 52;
-          if (hitOnBall || swipedThroughBall || naturalSwipe) {
+          // Must touch the ball within its timing circle at the start of the swipe
+          if (this.startedOnBall && target.inRange && distFromStart >= 32) {
             this.swipeVisual.active = false;
             this.emitBufferedSwipe(now, e.clientX, e.clientY);
           }
@@ -318,7 +280,7 @@ export class InputManager {
       } else if (!this.swipeFired) {
         const target = this.getSwipeTarget?.() ?? null;
         const canFireOnRelease =
-          !target || target.allowAnywhere || target.inRange;
+          !target || target.allowAnywhere || (this.startedOnBall && target.inRange);
         if (canFireOnRelease) {
           const now = performance.now();
           this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });

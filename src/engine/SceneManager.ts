@@ -141,10 +141,8 @@ export class SceneManager {
 
   private netHitDotMesh!: THREE.Mesh;
   private netArrowGroup!: THREE.Group;
-  private landingRingMesh!: THREE.Mesh;
-  private landingRingMat!: THREE.MeshBasicMaterial;
-  private landingInnerMesh!: THREE.Mesh;
-  private landingInnerMat!: THREE.MeshBasicMaterial;
+  private ballStreakMesh!: THREE.Mesh;
+  private ballStreakMat!: THREE.MeshBasicMaterial;
   private timingRingGroup!: THREE.Group;
   private timingOuterMesh!: THREE.Mesh;
   private timingOuterMat!: THREE.MeshBasicMaterial;
@@ -250,7 +248,7 @@ export class SceneManager {
     this.netGroup = this.createOfficialNet();
     this.scene.add(this.netGroup);
     this.createNetDirectionArrow();
-    this.createLandingCircle();
+    this.createBallStreak();
     this.createTimingRing();
     this.createFirstPersonArm();
     this.ballMesh = this.createOfficialBall();
@@ -860,46 +858,35 @@ export class SceneManager {
     this.scene.add(group);
   }
 
-  private createLandingCircle(): void {
-    // Outer ring bigger than player foot+stamina ring (0.54 m -> outer landing circle 0.64..0.74 m)
-    const outerGeo = new THREE.RingGeometry(0.64, 0.74, 40);
-    this.landingRingMat = new THREE.MeshBasicMaterial({
-      color: 0x3b82f6,
-      transparent: true,
-      opacity: 0.92,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
-    });
-    const ring = new THREE.Mesh(outerGeo, this.landingRingMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.018;
-    ring.renderOrder = 2;
-    ring.visible = false;
-    this.landingRingMesh = ring;
-    this.scene.add(ring);
+  private createBallStreak(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    const grad = ctx.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0, 'rgba(254, 240, 138, 0.85)');
+    grad.addColorStop(0.35, 'rgba(250, 204, 21, 0.45)');
+    grad.addColorStop(1, 'rgba(250, 204, 21, 0.0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 128);
 
-    // Dynamic inner height-indicator circle:
-    // Same color as outside ring; smaller when ball is high, grows larger closer to ground, FULL (0.64 m) at hitting height!
-    const innerGeo = new THREE.CircleGeometry(0.64, 36);
-    this.landingInnerMat = new THREE.MeshBasicMaterial({
-      color: 0x3b82f6,
+    const tex = new THREE.CanvasTexture(canvas);
+    const geo = new THREE.CylinderGeometry(OFFICIAL_BALL.radius * 0.92, 0.004, 1.0, 14, 1, true);
+    // Align cylinder so tip trails along -Z when lookAt(+vel) is called
+    geo.translate(0, -0.5, 0);
+    geo.rotateX(Math.PI / 2);
+
+    this.ballStreakMat = new THREE.MeshBasicMaterial({
+      map: tex,
       transparent: true,
-      opacity: 0.65,
-      side: THREE.DoubleSide,
+      opacity: 0.78,
       depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      side: THREE.DoubleSide,
     });
-    this.landingInnerMesh = new THREE.Mesh(innerGeo, this.landingInnerMat);
-    this.landingInnerMesh.rotation.x = -Math.PI / 2;
-    this.landingInnerMesh.position.y = 0.017;
-    this.landingInnerMesh.renderOrder = 2;
-    this.landingInnerMesh.visible = false;
-    this.scene.add(this.landingInnerMesh);
+    this.ballStreakMesh = new THREE.Mesh(geo, this.ballStreakMat);
+    this.ballStreakMesh.visible = false;
+    this.ballStreakMesh.renderOrder = 3;
+    this.scene.add(this.ballStreakMesh);
   }
 
   private createTimingRing(): void {
@@ -959,10 +946,18 @@ export class SceneManager {
     this.scene.add(group);
   }
 
+  private getTimingCircleWorldRadius(ballPos: THREE.Vector3, quality01: number): number {
+    const camDist = Math.max(0.6, this.camera.position.distanceTo(ballPos));
+    const minR = OFFICIAL_BALL.radius * 1.15;
+    const maxR = minR + camDist * 0.135;
+    // Circle grows BIGGER the better the hit quality is!
+    return THREE.MathUtils.lerp(minR, maxR, THREE.MathUtils.clamp(quality01, 0, 1));
+  }
+
   public updateTimingRing(
     visible: boolean,
     ballPos: THREE.Vector3,
-    ringProgress: number,
+    quality01: number,
     zone: 'green' | 'yellow' | 'red',
     inRange = false
   ): void {
@@ -974,43 +969,43 @@ export class SceneManager {
     this.timingRingGroup.position.copy(ballPos);
     this.timingRingGroup.quaternion.copy(this.camera.quaternion);
 
-    // Perspective-compensated outer radius so the shrinking circle ALWAYS unmistakably closes in on screen!
-    const camDist = Math.max(0.6, this.camera.position.distanceTo(ballPos));
-    const ballEdgeR = OFFICIAL_BALL.radius * 1.48;
-    const farOuterR = ballEdgeR + camDist * 0.145;
-    const lateTightR = OFFICIAL_BALL.radius * 0.9;
-    const outerRadius =
-      ringProgress >= 0.5
-        ? THREE.MathUtils.lerp(ballEdgeR, farOuterR, (ringProgress - 0.5) * 2)
-        : THREE.MathUtils.lerp(lateTightR, ballEdgeR, ringProgress * 2);
+    const outerRadius = this.getTimingCircleWorldRadius(ballPos, quality01);
     this.timingOuterMesh.scale.setScalar(outerRadius);
 
     const hex = zone === 'green' ? 0x4ade80 : zone === 'yellow' ? 0xfacc15 : 0xf87171;
     this.timingOuterMat.color.setHex(hex);
-    this.timingOuterMat.opacity = inRange ? 0.96 : 0.76;
+    this.timingOuterMat.opacity = inRange ? 0.96 : 0.72;
 
     this.timingTargetMat.color.setHex(inRange && zone === 'green' ? 0x4ade80 : hex);
     this.timingTargetMat.opacity = inRange
       ? zone === 'green'
-        ? 0.95
-        : 0.65
+        ? 0.92
+        : 0.6
       : 0.25;
 
-    // Glow halo lights up unmistakably when ball is within hitting range
+    // Glow halo lights up when ball is within hitting range
     this.timingGlowMat.color.setHex(hex);
     this.timingGlowMat.opacity = inRange ? (zone === 'green' ? 0.34 : 0.2) : 0.0;
     this.timingGlowMesh.visible = inRange;
   }
 
   public getBallScreenTarget(
-    ballPos: THREE.Vector3
+    ballPos: THREE.Vector3,
+    quality01 = 0.5
   ): { x: number; y: number; radiusPx: number } | null {
     const proj = ballPos.clone().project(this.camera);
     if (proj.z > 1) return null;
     const x = (proj.x * 0.5 + 0.5) * window.innerWidth;
     const y = (-proj.y * 0.5 + 0.5) * window.innerHeight;
-    const dist = this.camera.position.distanceTo(ballPos);
-    const radiusPx = THREE.MathUtils.clamp(210 / Math.max(1.2, dist), 58, 102);
+
+    // Match tap hitbox radius to the exact visual timing circle size on screen!
+    const worldR = this.getTimingCircleWorldRadius(ballPos, quality01);
+    const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const edgeProj = ballPos.clone().addScaledVector(camRight, worldR).project(this.camera);
+    const edgeX = (edgeProj.x * 0.5 + 0.5) * window.innerWidth;
+    const edgeY = (-edgeProj.y * 0.5 + 0.5) * window.innerHeight;
+    const visualPx = Math.hypot(edgeX - x, edgeY - y);
+    const radiusPx = THREE.MathUtils.clamp(visualPx * 1.15, 42, 145);
     return { x, y, radiusPx };
   }
 
@@ -1029,11 +1024,28 @@ export class SceneManager {
     ballVel: THREE.Vector3,
     isLive: boolean,
     isAimedAfterHit: boolean,
-    activeTeamHex: number,
-    activeTeamCss: string,
+    _activeTeamHex: number,
+    _activeTeamCss: string,
     partnerPos?: THREE.Vector3,
     enemyPositions: THREE.Vector3[] = []
   ): void {
+    // Update blurry velocity motion-trail behind the ball
+    const speed = ballVel.length();
+    if (isLive && speed >= 0.75) {
+      this.ballStreakMesh.visible = true;
+      this.ballStreakMesh.position.copy(ballPos);
+      this.ballStreakMesh.lookAt(
+        ballPos.x + ballVel.x,
+        ballPos.y + ballVel.y,
+        ballPos.z + ballVel.z
+      );
+      const streakLen = THREE.MathUtils.clamp(speed * 0.085, 0.2, 1.15);
+      this.ballStreakMesh.scale.set(1, 1, streakLen);
+      this.ballStreakMat.opacity = THREE.MathUtils.clamp(speed * 0.09, 0.3, 0.82);
+    } else {
+      this.ballStreakMesh.visible = false;
+    }
+
     if (this.cameraViewMode !== 'pressbox' && !this.calibrateMode) {
       this.fpHints.netEdge = this.projectEdgeIndicator(
         new THREE.Vector3(0, 0.25, 0),
@@ -1060,17 +1072,13 @@ export class SceneManager {
       for (const e of this.fpHints.enemyEdges) e.visible = false;
     }
 
-    if (!isLive || ballPos.y <= OFFICIAL_BALL.radius + 0.01) {
+    this.offscreenLandingHint.visible = false;
+
+    if (!isLive || ballPos.y <= OFFICIAL_BALL.radius + 0.01 || !isAimedAfterHit) {
       this.netHitDotMesh.visible = false;
       this.netArrowGroup.visible = false;
-      this.landingRingMesh.visible = false;
-      this.landingInnerMesh.visible = false;
-      this.offscreenLandingHint.visible = false;
       return;
     }
-
-    this.landingRingMat.color.setHex(activeTeamHex);
-    this.landingInnerMat.color.setHex(activeTeamHex);
 
     const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
     const netDiscRadius = OFFICIAL_NET.rimRadius + OFFICIAL_NET.rimTubeRadius * 0.5;
@@ -1088,9 +1096,8 @@ export class SceneManager {
     let netHitZ = 0;
     let netOutVx = 0;
     let netOutVz = 0;
-    let landed = false;
 
-    for (let i = 0; i < 280; i++) {
+    for (let i = 0; i < 200; i++) {
       const prevX = x;
       const prevY = y;
       const prevZ = z;
@@ -1118,25 +1125,13 @@ export class SceneManager {
           willHitNet = true;
           netHitX = hx;
           netHitZ = hz;
-          const outVy = Math.max(2.6, Math.abs(vy) * OFFICIAL_NET.netRestitution);
-          vx *= OFFICIAL_NET.netHorizontalDamping;
-          vz *= OFFICIAL_NET.netHorizontalDamping;
-          vy = outVy;
-          netOutVx = vx;
-          netOutVz = vz;
-          x = hx;
-          y = netPlaneY + 0.015;
-          z = hz;
-          continue;
+          netOutVx = vx * OFFICIAL_NET.netHorizontalDamping;
+          netOutVz = vz * OFFICIAL_NET.netHorizontalDamping;
+          break;
         }
       }
 
-      // Check ground impact
       if (y <= OFFICIAL_BALL.radius) {
-        const alpha = (OFFICIAL_BALL.radius - prevY) / Math.min(-0.0001, y - prevY);
-        x = prevX + (x - prevX) * alpha;
-        z = prevZ + (z - prevZ) * alpha;
-        landed = true;
         break;
       }
     }
@@ -1158,62 +1153,6 @@ export class SceneManager {
     } else {
       this.netHitDotMesh.visible = false;
       this.netArrowGroup.visible = false;
-    }
-
-    // Always show ground landing spot whenever airborne
-    if (landed || y < 12) {
-      this.landingRingMesh.position.set(x, 0.018, z);
-      this.landingRingMesh.visible = true;
-
-      // Dynamic inner circle: small when high (> 1.98 m), grows larger closer to ground, FULL (1.0) at hitting height!
-      const hitHeight = 1.98;
-      const maxHeight = 4.2;
-      let innerScale: number;
-      if (ballPos.y <= hitHeight) {
-        innerScale = 1.0;
-        this.landingInnerMat.opacity = 0.78;
-      } else {
-        const heightNorm = THREE.MathUtils.clamp(
-          (ballPos.y - hitHeight) / (maxHeight - hitHeight),
-          0,
-          1
-        );
-        innerScale = THREE.MathUtils.lerp(0.86, 0.18, heightNorm);
-        this.landingInnerMat.opacity = 0.62;
-      }
-      this.landingInnerMesh.position.set(x, 0.017, z);
-      this.landingInnerMesh.scale.setScalar(innerScale);
-      this.landingInnerMesh.visible = true;
-
-      const proj = this.landingRingMesh.position.clone().project(this.camera);
-      const isOffscreen =
-        proj.z > 1 || Math.abs(proj.x) > 0.9 || Math.abs(proj.y) > 0.9;
-      if (isOffscreen) {
-        let nx = proj.z > 1 ? -proj.x : proj.x;
-        let ny = proj.z > 1 ? -proj.y : proj.y;
-        const maxAxis = Math.max(Math.abs(nx), Math.abs(ny), 0.001);
-        nx /= maxAxis;
-        ny /= maxAxis;
-        const pad = 42;
-        const halfW = window.innerWidth * 0.5 - pad;
-        const halfH = window.innerHeight * 0.5 - pad;
-        const sx = window.innerWidth * 0.5 + nx * halfW;
-        const sy = window.innerHeight * 0.5 - ny * halfH;
-        const angleDeg = (Math.atan2(-ny, nx) * 180) / Math.PI;
-        this.offscreenLandingHint = {
-          visible: true,
-          screenX: sx,
-          screenY: sy,
-          angleDeg,
-          teamColor: activeTeamCss,
-        };
-      } else {
-        this.offscreenLandingHint.visible = false;
-      }
-    } else {
-      this.landingRingMesh.visible = false;
-      this.landingInnerMesh.visible = false;
-      this.offscreenLandingHint.visible = false;
     }
   }
 
@@ -1806,10 +1745,6 @@ export class SceneManager {
     const proj = new THREE.Vector3();
     for (const p of trackedPoints) {
       proj.copy(p).project(this.camera);
-      maxEdge = Math.max(maxEdge, Math.abs(proj.x), Math.abs(proj.y));
-    }
-    if (this.landingRingMesh.visible) {
-      proj.copy(this.landingRingMesh.position).project(this.camera);
       maxEdge = Math.max(maxEdge, Math.abs(proj.x), Math.abs(proj.y));
     }
 

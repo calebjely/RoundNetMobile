@@ -28,6 +28,8 @@ interface GameHUDProps {
   calibrateTab: CalibratorTab;
   onChangeCalibrateTab: (tab: CalibratorTab) => void;
   onToggleCalibrate: () => void;
+  practiceMode: boolean;
+  onTogglePracticeMode: () => void;
   cameraViewMode: CameraViewMode;
   onChangeCameraViewMode: (mode: CameraViewMode) => void;
   viewSettings: CameraViewSettings;
@@ -61,6 +63,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   calibrateTab,
   onChangeCalibrateTab,
   onToggleCalibrate,
+  practiceMode,
+  onTogglePracticeMode,
   cameraViewMode,
   onChangeCameraViewMode,
   viewSettings,
@@ -157,6 +161,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         <div className={`score-pill enemy ${!myServing ? 'serving' : ''}`}>
           <span className="score-num">{enemyScore}</span>
         </div>
+        {practiceMode && (
+          <button
+            className="practice-pill"
+            onClick={onTogglePracticeMode}
+            title="Exit Practice Mode"
+          >
+            PRACTICE
+          </button>
+        )}
       </div>
 
       {/* Top-Center Live Event & Coaching Feed */}
@@ -360,6 +373,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         onChangeIntroStyle={onChangeIntroStyle}
         calibrateMode={calibrateMode}
         onToggleCalibrate={onToggleCalibrate}
+        practiceMode={practiceMode}
+        onTogglePracticeMode={onTogglePracticeMode}
       />
 
       <CalibratorPanel

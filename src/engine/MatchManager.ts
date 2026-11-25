@@ -93,6 +93,7 @@ export class MatchManager {
   public popups: TimingPopup[] = [];
   private feedCounter = 0;
   public feed: FeedEntry[] = [];
+  public practiceMode = false;
 
   private readonly players: CharacterController[];
   private readonly physics: PhysicsWorld;
@@ -294,6 +295,7 @@ export class MatchManager {
 
       // Early return fault on 1st possession after serve (must use all 3 touches!)
       if (
+        !this.practiceMode &&
         this.isFirstPossessionAfterServe &&
         outcome.isAttackAtNet &&
         nextTouches < 3
@@ -393,7 +395,7 @@ export class MatchManager {
       }
 
       // Enforce 3-touch rule on first possession after serve
-      if (this.isFirstPossessionAfterServe && this.teamTouches < 3) {
+      if (!this.practiceMode && this.isFirstPossessionAfterServe && this.teamTouches < 3) {
         this.awardPoint(
           this.possessionTeam === 'A' ? 'B' : 'A',
           'Must use 3 touches on serve receive!'
@@ -423,6 +425,10 @@ export class MatchManager {
       return;
     }
     if (this.phase === 'RALLY_LIVE') {
+      if (this.practiceMode) {
+        this.pushFeed('Practice — rim bounce kept alive!', 'warn');
+        return;
+      }
       this.pushFeed('Rim Fault!', 'bad');
       // IRF rule: hitting the rim on an attack is a fault for the hitting team
       const hittingTeam = this.teamTouches > 0 ? this.possessionTeam : (this.lastAttackTeam ?? 'A');
@@ -452,6 +458,22 @@ export class MatchManager {
     }
 
     if (this.phase === 'RALLY_LIVE') {
+      if (this.practiceMode) {
+        const human = this.players.find((p) => p.isHuman);
+        const targetPos = human
+          ? new THREE.Vector3(human.position.x * 0.85, 1.15, human.position.z * 0.85)
+          : new THREE.Vector3(0, 1.15, 2.2);
+        const startPos = new THREE.Vector3(x, OFFICIAL_BALL.radius + 0.12, z);
+        const vel = computeBallisticVelocity(startPos, targetPos, 1.05);
+        this.physics.setBallState(startPos, vel, true);
+        this.possessionTeam = human?.team ?? 'A';
+        this.teamTouches = 0;
+        this.lastTouchPlayerIdx = -1;
+        this.isFirstPossessionAfterServe = false;
+        this.pushFeed('Practice feed — test Close vs Away!', 'info');
+        return;
+      }
+
       // Check NHZ "no-drop" rule for net attacks
       if (this.teamTouches === 0 && dist <= IRF_2026_RULES.noHitZoneRadius && this.lastAttackTeam) {
         this.awardPoint(
@@ -705,6 +727,14 @@ export class MatchManager {
     this.bannerTone = 'redo';
     this.serveAttempt = 1;
     this.spawnPopup(worldPos.clone().add(new THREE.Vector3(0, 1.3, 0)), 'INTERFERENCE!', 'Redo');
+  }
+
+  public setPracticeMode(enabled: boolean): void {
+    this.practiceMode = enabled;
+    this.pushFeed(
+      enabled ? 'Practice Mode ON (Endless Rally)' : 'Practice Mode OFF',
+      'info'
+    );
   }
 
   public pushFeed(text: string, tone: FeedEntry['tone'] = 'info'): void {

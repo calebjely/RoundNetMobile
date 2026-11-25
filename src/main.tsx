@@ -59,6 +59,7 @@ const App: React.FC = () => {
     inRange: false,
   });
   const [stance, setStance] = useState<'close' | 'away'>('close');
+  const [practiceMode, setPracticeMode] = useState(false);
   const [calibrateMode, setCalibrateMode] = useState(
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
@@ -261,7 +262,7 @@ const App: React.FC = () => {
         const bPos = physics.getBallPosition();
         const bVel = physics.getBallVelocity();
         const contact = ShotResolver.evaluateContactTiming(bPos, bVel, human.position);
-        const screenTarget = sceneMgr.getBallScreenTarget(bPos);
+        const screenTarget = sceneMgr.getBallScreenTarget(bPos, contact.quality01);
         if (!screenTarget) {
           return {
             x: window.innerWidth * 0.5,
@@ -344,8 +345,12 @@ const App: React.FC = () => {
           matchMgr.phase === 'SERVE_IN_FLIGHT' ||
           matchMgr.phase === 'SERVE_METER_ACTIVE';
         const isAimedAfterHit =
-          (matchMgr.phase === 'SERVE_IN_FLIGHT' && !matchMgr.serveReboundedOffNet) ||
-          (matchMgr.phase === 'RALLY_LIVE' && matchMgr.teamTouches > 0);
+          (matchMgr.phase === 'SERVE_IN_FLIGHT' &&
+            !matchMgr.serveReboundedOffNet &&
+            matchMgr.getServingTeam() === human.team) ||
+          (matchMgr.phase === 'RALLY_LIVE' &&
+            matchMgr.teamTouches > 0 &&
+            matchMgr.possessionTeam === human.team);
         const activeBallTeam: TeamId =
           matchMgr.phase === 'SERVE_IN_FLIGHT'
             ? matchMgr.serveReboundedOffNet
@@ -392,12 +397,12 @@ const App: React.FC = () => {
           sceneMgr.updateTimingRing(
             true,
             ballPos,
-            contact.ringProgress,
+            contact.quality01,
             contact.zone,
             contact.inRange
           );
         } else {
-          sceneMgr.updateTimingRing(false, ballPos, 1, 'yellow', false);
+          sceneMgr.updateTimingRing(false, ballPos, 0, 'yellow', false);
         }
 
         sceneMgr.updateFirstPersonArm(rawDt);
@@ -509,6 +514,12 @@ const App: React.FC = () => {
           calibrateTab={calibrateTab}
           onChangeCalibrateTab={handleChangeCalibrateTab}
           onToggleCalibrate={handleToggleCalibrate}
+          practiceMode={practiceMode}
+          onTogglePracticeMode={() => {
+            const next = !practiceMode;
+            setPracticeMode(next);
+            engineRef.current?.matchMgr.setPracticeMode(next);
+          }}
           cameraViewMode={cameraViewMode}
           onChangeCameraViewMode={handleChangeCameraViewMode}
           viewSettings={viewSettings}

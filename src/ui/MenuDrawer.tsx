@@ -14,6 +14,8 @@ interface MenuDrawerProps {
   onChangeIntroStyle: (style: IntroCameraStyle) => void;
   calibrateMode: boolean;
   onToggleCalibrate: () => void;
+  practiceMode: boolean;
+  onTogglePracticeMode: () => void;
 }
 
 const INTRO_OPTIONS: { id: IntroCameraStyle; label: string }[] = [
@@ -35,6 +37,8 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
   onChangeIntroStyle,
   calibrateMode,
   onToggleCalibrate,
+  practiceMode,
+  onTogglePracticeMode,
 }) => {
   if (!open) return null;
 
@@ -152,6 +156,17 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
             }}
           >
             {calibrateMode ? 'Exit Scene Calibrator (F2)' : 'Toggle Scene Calibrator (F2)'}
+          </button>
+
+          <button
+            className={`action-btn full ${practiceMode ? 'active' : ''}`}
+            style={{ marginTop: 8 }}
+            onClick={() => {
+              onTogglePracticeMode();
+              onClose();
+            }}
+          >
+            {practiceMode ? 'Practice Rally: ON (Tap to End)' : 'Practice Rally (Endless Test)'}
           </button>
 
           <button

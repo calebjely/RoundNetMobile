@@ -121,6 +121,18 @@ body,
   line-height: 1;
 }
 
+.practice-pill {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1.5px solid #38bdf8;
+  background: rgba(14, 116, 144, 0.85);
+  color: #e0f2fe;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
 /* Top-Center Live Activity & Coaching Feed */
 .feed-stack {
   position: absolute;
