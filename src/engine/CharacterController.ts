@@ -528,9 +528,11 @@ export class CharacterController {
 
     this.position.addScaledVector(this.velocity, dt);
 
-    // Keep player outside physical net rim cylinder (0.48 m); no outer boundary clamp during live play!
+    // Stop players at the No-Hit Zone (1.00 m) edge so they never walk inside it
     let distFromCenter = Math.hypot(this.position.x, this.position.z);
-    const minRadius = restrictToQuarterSlice ? IRF_2026_RULES.serviceLineRadius + 0.05 : 0.56;
+    const minRadius = restrictToQuarterSlice
+      ? IRF_2026_RULES.serviceLineRadius + 0.05
+      : IRF_2026_RULES.noHitZoneRadius + 0.04;
     if (distFromCenter < minRadius && distFromCenter > 0.001) {
       const push = minRadius / distFromCenter;
       this.position.x *= push;

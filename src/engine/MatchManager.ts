@@ -302,12 +302,6 @@ export class MatchManager {
         return;
       }
 
-      // NHZ check on final hitter strike
-      if (outcome.isAttackAtNet && human.isInsideNHZ()) {
-        this.awardPoint(human.team === 'A' ? 'B' : 'A', 'No-Hit Zone Foot Fault!');
-        return;
-      }
-
       if (outcome.triggeredDive) {
         const diveDir = ballPos.clone().sub(human.position).setY(0).normalize();
         human.triggerDive(diveDir);
@@ -395,13 +389,6 @@ export class MatchManager {
         // Ball bounced twice on net -> hitting team loses point
         const defendingTeam = this.possessionTeam;
         this.awardPoint(defendingTeam, 'Double Bounce on Net!');
-        return;
-      }
-
-      // Check follow-through NHZ fault for last attacker
-      const lastHitter = this.players.find((p) => p.config.slotIndex === this.lastTouchPlayerIdx);
-      if (lastHitter && lastHitter.hasActiveNHZFollowThrough() && lastHitter.isInsideNHZ()) {
-        this.awardPoint(lastHitter.team === 'A' ? 'B' : 'A', 'No-Hit Zone Follow-Through Fault!');
         return;
       }
 

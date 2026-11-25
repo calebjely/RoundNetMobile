@@ -3,7 +3,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
-import { IRF_2026_RULES } from '../config/rules';
 import {
   CameraPreset,
   CameraViewMode,
@@ -247,7 +246,7 @@ export class SceneManager {
     this.scene.add(this.courtGroup);
 
     this.setupLighting();
-    this.createCourtMarkings();
+    // Court lines (NHZ, service line, outer boundary, quarter lines) exist in rules/physics without visual lines
     this.netGroup = this.createOfficialNet();
     this.scene.add(this.netGroup);
     this.createNetDirectionArrow();
@@ -290,58 +289,6 @@ export class SceneManager {
     shadowPlane.position.y = 0.003;
     shadowPlane.receiveShadow = true;
     this.scene.add(shadowPlane);
-  }
-
-  private createCourtMarkings(): void {
-    const createRing = (radius: number, thickness: number, color: number, opacity: number) => {
-      const geo = new THREE.RingGeometry(radius - thickness * 0.5, radius + thickness * 0.5, 72);
-      const mat = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = 0.012;
-      mesh.renderOrder = 1;
-      return mesh;
-    };
-
-    // 1.00 m No-Hit Zone (NHZ)
-    this.scene.add(createRing(IRF_2026_RULES.noHitZoneRadius, 0.035, 0xf87171, 0.48));
-    // 2.60 m Service Line
-    this.scene.add(createRing(IRF_2026_RULES.serviceLineRadius, 0.035, 0xffffff, 0.42));
-    // 8.50 m Outer Boundary
-    this.scene.add(createRing(IRF_2026_RULES.outerBoundaryRadius, 0.05, 0xffffff, 0.3));
-
-    // Quarter ("pizza slice") dividing lines at 45°, 135°, 225°, 315°
-    const lineLen = IRF_2026_RULES.outerBoundaryRadius - IRF_2026_RULES.noHitZoneRadius;
-    const midR = (IRF_2026_RULES.outerBoundaryRadius + IRF_2026_RULES.noHitZoneRadius) * 0.5;
-    const lineGeo = new THREE.PlaneGeometry(0.03, lineLen);
-    const lineMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.24,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-    });
-    for (let i = 0; i < 4; i++) {
-      const angle = Math.PI / 4 + (i * Math.PI) / 2;
-      const line = new THREE.Mesh(lineGeo, lineMat);
-      line.rotation.x = -Math.PI / 2;
-      line.rotation.z = -angle;
-      line.position.set(Math.sin(angle) * midR, 0.012, Math.cos(angle) * midR);
-      line.renderOrder = 1;
-      this.scene.add(line);
-    }
   }
 
   private createNetTexture(): THREE.CanvasTexture {
