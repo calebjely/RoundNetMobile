@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CameraViewMode,
   CameraViewSettings,
@@ -77,27 +77,65 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onSaveNow,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [fsDismissedUnsupported, setFsDismissedUnsupported] = useState(false);
+
+  const checkIsFullscreen = () => {
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    const isStandalone =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(display-mode: standalone)').matches;
+    return Boolean(doc.fullscreenElement || doc.webkitFullscreenElement || isStandalone);
+  };
+
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(checkIsFullscreen);
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(checkIsFullscreen());
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
 
   const myScore = hud.humanTeam === 'A' ? hud.scoreA : hud.scoreB;
   const enemyScore = hud.humanTeam === 'A' ? hud.scoreB : hud.scoreA;
   const myServing = hud.servingTeam === hud.humanTeam;
 
-  const handleToggleFullscreen = async () => {
+  const enterFullscreenLandscape = async () => {
+    const el = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void>;
+    };
     try {
-      const el = document.documentElement as HTMLElement & {
-        webkitRequestFullscreen?: () => Promise<void>;
-      };
-      if (!document.fullscreenElement) {
-        if (el.requestFullscreen) await el.requestFullscreen();
-        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if (el.webkitRequestFullscreen) {
+        await el.webkitRequestFullscreen();
       } else {
-        await document.exitFullscreen?.();
+        setFsDismissedUnsupported(true);
       }
       const orient = screen.orientation as ScreenOrientation & {
         lock?: (o: string) => Promise<void>;
       };
       if (orient?.lock) {
         await orient.lock('landscape').catch(() => {});
+      }
+    } catch {
+      if (!el.requestFullscreen && !el.webkitRequestFullscreen) {
+        setFsDismissedUnsupported(true);
+      }
+    }
+    setIsFullscreen(checkIsFullscreen());
+  };
+
+  const handleToggleFullscreen = async () => {
+    try {
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
+        await enterFullscreenLandscape();
+      } else {
+        await document.exitFullscreen?.();
       }
     } catch {
       // ignore if browser blocks fullscreen
@@ -342,6 +380,23 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         onSaveNow={onSaveNow}
         onExit={onToggleCalibrate}
       />
+
+      {/* Fullscreen Gate Overlay when not in fullscreen */}
+      {!isFullscreen && !fsDismissedUnsupported && (
+        <div className="fullscreen-gate" data-ui-interactive="true">
+          <div className="fullscreen-gate-card">
+            <p className="fullscreen-gate-msg">
+              Your screen isn&apos;t full screened. To continue playing, set your screen to full screen
+            </p>
+            <button
+              className="fullscreen-gate-btn"
+              onClick={enterFullscreenLandscape}
+            >
+              Full Screen
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
