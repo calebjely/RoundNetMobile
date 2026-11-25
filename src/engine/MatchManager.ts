@@ -167,7 +167,7 @@ export class MatchManager {
     this.serveMeterDir = 1;
     this.phase = 'SERVE_WAIT_TOSS';
     this.botServeDelay = 0.9;
-    this.bannerText = `${server.config.profile.name} to Serve (${this.serveAttempt === 1 ? '1st' : '2nd'} Attempt)`;
+    this.bannerText = null;
     this.bannerTone = 'info';
 
     this.physics.setBallState(this.getServerHandPos(server), new THREE.Vector3(0, 0, 0), false);
@@ -190,7 +190,7 @@ export class MatchManager {
         this.phase = 'SERVE_METER_ACTIVE';
         this.serveMeterValue = 0.08;
         this.serveMeterDir = 1;
-        this.bannerText = 'SWIPE IN GREEN SWEET SPOT!';
+        this.bannerText = null;
         this.bannerTone = 'info';
       }
       return;
@@ -204,7 +204,7 @@ export class MatchManager {
       }
 
       const ballPos = this.physics.getBallPosition();
-      const { velocity, quality, isShank } = ShotResolver.resolveServeStrike(
+      const { velocity } = ShotResolver.resolveServeStrike(
         human,
         ballPos,
         swipe,
@@ -214,7 +214,6 @@ export class MatchManager {
 
       this.physics.setBallState(ballPos, velocity, true);
       human.setAnimState('serve_hit', 0.4);
-      this.spawnPopup(ballPos, isShank ? 'SHANK!' : quality, isShank ? 'Fault' : quality);
       this.phase = 'SERVE_IN_FLIGHT';
       this.bannerText = null;
       return;
@@ -302,13 +301,6 @@ export class MatchManager {
       this.possessionTeam = human.team;
       this.teamTouches = nextTouches;
       this.lastTouchPlayerIdx = human.config.slotIndex;
-      const label =
-        outcome.timing === 'Bad'
-          ? 'SHANK!'
-          : outcome.shotType === 'SPIKE' && outcome.timing === 'Perfect'
-            ? 'SPIKE!'
-            : outcome.timing;
-      this.spawnPopup(ballPos, label, outcome.timing);
     }
   }
 
@@ -390,7 +382,7 @@ export class MatchManager {
     }
   }
 
-  public onRimHit(x: number, z: number): void {
+  public onRimHit(_x: number, _z: number): void {
     if (this.phase === 'SERVE_IN_FLIGHT') {
       if (!this.serveReboundedOffNet) {
         this.triggerServeFault('Serve Rim Fault');
@@ -398,7 +390,6 @@ export class MatchManager {
       return;
     }
     if (this.phase === 'RALLY_LIVE') {
-      this.spawnPopup(new THREE.Vector3(x, OFFICIAL_NET.netHeight + 0.15, z), 'RIM FAULT!', 'Fault');
       // IRF rule: hitting the rim on an attack is a fault for the hitting team
       const hittingTeam = this.teamTouches > 0 ? this.possessionTeam : (this.lastAttackTeam ?? 'A');
       this.awardPoint(hittingTeam === 'A' ? 'B' : 'A', 'Rim Fault!');

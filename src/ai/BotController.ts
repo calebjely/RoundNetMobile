@@ -143,10 +143,12 @@ export class BotController {
               const dz = intercept.z - bot.position.z;
               const distToIntercept = Math.hypot(dx, dz);
 
-              if (distToIntercept > 0.25) {
+              // In 1st-person auto-runner, stop ~0.92 m shy of the ball so it drops cleanly in front of view
+              const stopDist = movementOnly ? 0.92 : 0.25;
+              if (distToIntercept > stopDist) {
                 moveIntent.set(dx / distToIntercept, dz / distToIntercept);
                 deflection = movementOnly
-                  ? distToIntercept > 1.2 ? 0.88 : 0.52
+                  ? distToIntercept > 1.85 ? 0.9 : 0.56
                   : distToIntercept > 1.3 ? 0.68 : 0.42;
               }
             }

@@ -13,7 +13,7 @@ import {
   persistCourtConfig,
 } from './config/maps';
 import { CharacterController } from './engine/CharacterController';
-import { InputManager, JoystickVisualState } from './engine/InputManager';
+import { InputManager, JoystickVisualState, SwipeVisualState } from './engine/InputManager';
 import { MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
 import { PhysicsWorld } from './engine/PhysicsWorld';
 import {
@@ -52,6 +52,17 @@ const App: React.FC = () => {
   const [fpHints, setFpHints] = useState<FirstPersonHints>({
     netEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#facc15' },
     partnerEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' },
+    enemyEdges: [],
+  });
+  const [ballInRange, setBallInRange] = useState(false);
+  const [swipeVisual, setSwipeVisual] = useState<SwipeVisualState>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    curX: 0,
+    curY: 0,
+    onBall: false,
+    inRange: false,
   });
   const [stance, setStance] = useState<'close' | 'away'>('close');
   const [returnToNetActive, setReturnToNetActive] = useState(false);
@@ -190,22 +201,7 @@ const App: React.FC = () => {
           const camRight = new THREE.Vector3()
             .crossVectors(camFwd, new THREE.Vector3(0, 1, 0))
             .normalize();
-          const beforePhase = matchMgr.phase;
-          const beforeTouches = matchMgr.teamTouches;
           matchMgr.handleHumanSwipe(swipe, camRight);
-          const didHit =
-            matchMgr.phase !== beforePhase || matchMgr.teamTouches !== beforeTouches;
-          if (
-            !didHit &&
-            (beforePhase === 'RALLY_LIVE' ||
-              (beforePhase === 'SERVE_IN_FLIGHT' && matchMgr.serveReboundedOffNet))
-          ) {
-            const bPos = physics.getBallPosition();
-            const dist = Math.hypot(bPos.x - human.position.x, bPos.z - human.position.z);
-            if (dist <= 4.2) {
-              matchMgr.showPopup(bPos, 'MISS!', 'Bad');
-            }
-          }
         },
         onBlockStart: () => {
           sceneMgr.skipIntroSpin();
@@ -227,6 +223,13 @@ const App: React.FC = () => {
       inputMgr.enabled = !initialCalibrate;
       inputMgr.fullScreenSwipe = sceneMgr.getCameraViewMode() === 'first_person';
       inputMgr.getSwipeTarget = () => {
+        if (
+          matchMgr.phase === 'SERVE_WAIT_TOSS' ||
+          matchMgr.phase === 'SERVE_METER_ACTIVE' ||
+          sceneMgr.getCameraViewMode() !== 'first_person'
+        ) {
+          return null;
+        }
         const isHumansTurn =
           (matchMgr.phase === 'SERVE_IN_FLIGHT' &&
             matchMgr.serveReboundedOffNet &&
@@ -234,11 +237,27 @@ const App: React.FC = () => {
           (matchMgr.phase === 'RALLY_LIVE' &&
             matchMgr.possessionTeam === human.team &&
             matchMgr.lastTouchPlayerIdx !== human.config.slotIndex);
-        if (!isHumansTurn) return null;
+        if (!isHumansTurn) {
+          return { x: -999, y: -999, radiusPx: 1, inRange: false, allowAnywhere: false };
+        }
         const bPos = physics.getBallPosition();
-        const dist = Math.hypot(bPos.x - human.position.x, bPos.z - human.position.z);
-        if (dist > 3.6) return null;
-        return sceneMgr.getBallScreenTarget(bPos);
+        const bVel = physics.getBallVelocity();
+        const contact = ShotResolver.evaluateContactTiming(bPos, bVel, human.position);
+        const screenTarget = sceneMgr.getBallScreenTarget(bPos);
+        if (!screenTarget) {
+          return {
+            x: window.innerWidth * 0.5,
+            y: window.innerHeight * 0.5,
+            radiusPx: 92,
+            inRange: contact.inRange,
+            allowAnywhere: false,
+          };
+        }
+        return {
+          ...screenTarget,
+          inRange: contact.inRange,
+          allowAnywhere: false,
+        };
       };
 
       engineRef.current = {
@@ -372,6 +391,9 @@ const App: React.FC = () => {
         const teammate = players.find(
           (p) => p.team === human.team && p.config.slotIndex !== human.config.slotIndex
         );
+        const enemyPositions = players
+          .filter((p) => p.team !== human.team)
+          .map((p) => p.position);
         sceneMgr.updateBallIndicators(
           ballPos,
           ballVel,
@@ -379,7 +401,8 @@ const App: React.FC = () => {
           isAimedAfterHit,
           teamMeta.hex,
           teamMeta.primary,
-          teammate?.position
+          teammate?.position,
+          enemyPositions
         );
 
         const isHumansTurn =
@@ -393,11 +416,19 @@ const App: React.FC = () => {
           ballPos.x - human.position.x,
           ballPos.z - human.position.z
         );
-        if (isHumansTurn && distToBall <= 3.6 && ballPos.y > 0.14) {
+        let latestInRange = false;
+        if (isHumansTurn && distToBall <= 5.6 && ballPos.y > 0.14) {
           const contact = ShotResolver.evaluateContactTiming(ballPos, ballVel, human.position);
-          sceneMgr.updateTimingRing(true, ballPos, contact.ringProgress, contact.zone);
+          latestInRange = contact.inRange;
+          sceneMgr.updateTimingRing(
+            true,
+            ballPos,
+            contact.ringProgress,
+            contact.zone,
+            contact.inRange
+          );
         } else {
-          sceneMgr.updateTimingRing(false, ballPos, 1, 'yellow');
+          sceneMgr.updateTimingRing(false, ballPos, 1, 'yellow', false);
         }
 
         sceneMgr.updateFirstPersonArm(rawDt);
@@ -415,6 +446,8 @@ const App: React.FC = () => {
           setPopups([...matchMgr.popups]);
           setOffscreenLanding(sceneMgr.getOffscreenLandingHint());
           setFpHints(sceneMgr.getFirstPersonHints());
+          setBallInRange(latestInRange);
+          setSwipeVisual({ ...inputMgr.swipeVisual });
           setIsHumanBlocking(human.isBlocking);
         }
 
@@ -478,6 +511,8 @@ const App: React.FC = () => {
           popups={popups}
           offscreenLanding={offscreenLanding}
           fpHints={fpHints}
+          ballInRange={ballInRange}
+          swipeVisual={swipeVisual}
           stance={stance}
           onToggleStance={() => {
             const next = stanceRef.current === 'close' ? 'away' : 'close';

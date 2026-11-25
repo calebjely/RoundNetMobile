@@ -29,6 +29,7 @@ export interface OffscreenLandingHint {
 export interface FirstPersonHints {
   netEdge: OffscreenLandingHint;
   partnerEdge: OffscreenLandingHint;
+  enemyEdges: OffscreenLandingHint[];
 }
 
 function smoothDampScalar(
@@ -101,6 +102,10 @@ export class SceneManager {
   private fpHints: FirstPersonHints = {
     netEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#facc15' },
     partnerEdge: { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' },
+    enemyEdges: [
+      { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#ef4444' },
+      { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#ef4444' },
+    ],
   };
 
   // Starting game cinematic camera intro animation
@@ -142,6 +147,8 @@ export class SceneManager {
   private timingOuterMat!: THREE.MeshBasicMaterial;
   private timingTargetMesh!: THREE.Mesh;
   private timingTargetMat!: THREE.MeshBasicMaterial;
+  private timingGlowMesh!: THREE.Mesh;
+  private timingGlowMat!: THREE.MeshBasicMaterial;
   private offscreenLandingHint: OffscreenLandingHint = {
     visible: false,
     screenX: 0,
@@ -774,6 +781,7 @@ export class SceneManager {
     return {
       netEdge: { ...this.fpHints.netEdge },
       partnerEdge: { ...this.fpHints.partnerEdge },
+      enemyEdges: this.fpHints.enemyEdges.map((e) => ({ ...e })),
     };
   }
 
@@ -902,6 +910,22 @@ export class SceneManager {
     group.visible = false;
     group.renderOrder = 6;
 
+    // Soft in-range halo glow right behind the ball (lights up when ball enters hitting range)
+    this.timingGlowMat = new THREE.MeshBasicMaterial({
+      color: 0x4ade80,
+      transparent: true,
+      opacity: 0.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: false,
+    });
+    this.timingGlowMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(OFFICIAL_BALL.radius * 1.9, 36),
+      this.timingGlowMat
+    );
+    this.timingGlowMesh.renderOrder = 5;
+    group.add(this.timingGlowMesh);
+
     // Inner sweet-spot reference ring snugly around the ball
     this.timingTargetMat = new THREE.MeshBasicMaterial({
       color: 0x4ade80,
@@ -912,23 +936,23 @@ export class SceneManager {
       depthTest: false,
     });
     this.timingTargetMesh = new THREE.Mesh(
-      new THREE.RingGeometry(0.088, 0.106, 48),
+      new THREE.RingGeometry(OFFICIAL_BALL.radius * 1.28, OFFICIAL_BALL.radius * 1.56, 48),
       this.timingTargetMat
     );
     this.timingTargetMesh.renderOrder = 6;
     group.add(this.timingTargetMesh);
 
-    // Outer shrinking approach ring around the ball
+    // Unit-radius outer shrinking approach ring (scaled dynamically with perspective compensation!)
     this.timingOuterMat = new THREE.MeshBasicMaterial({
       color: 0xfacc15,
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.94,
       side: THREE.DoubleSide,
       depthWrite: false,
       depthTest: false,
     });
     this.timingOuterMesh = new THREE.Mesh(
-      new THREE.RingGeometry(0.088, 0.114, 48),
+      new THREE.RingGeometry(0.86, 1.0, 48),
       this.timingOuterMat
     );
     this.timingOuterMesh.renderOrder = 7;
@@ -942,7 +966,8 @@ export class SceneManager {
     visible: boolean,
     ballPos: THREE.Vector3,
     ringProgress: number,
-    zone: 'green' | 'yellow' | 'red'
+    zone: 'green' | 'yellow' | 'red',
+    inRange = false
   ): void {
     if (!visible || this.calibrateMode || this.isIntroSpinning()) {
       this.timingRingGroup.visible = false;
@@ -952,16 +977,32 @@ export class SceneManager {
     this.timingRingGroup.position.copy(ballPos);
     this.timingRingGroup.quaternion.copy(this.camera.quaternion);
 
-    const scale =
+    // Perspective-compensated outer radius so the shrinking circle ALWAYS unmistakably closes in on screen!
+    const camDist = Math.max(0.6, this.camera.position.distanceTo(ballPos));
+    const ballEdgeR = OFFICIAL_BALL.radius * 1.48;
+    const farOuterR = ballEdgeR + camDist * 0.145;
+    const lateTightR = OFFICIAL_BALL.radius * 0.9;
+    const outerRadius =
       ringProgress >= 0.5
-        ? THREE.MathUtils.lerp(1.0, 2.55, (ringProgress - 0.5) * 2)
-        : THREE.MathUtils.lerp(0.56, 1.0, ringProgress * 2);
-    this.timingOuterMesh.scale.setScalar(scale);
+        ? THREE.MathUtils.lerp(ballEdgeR, farOuterR, (ringProgress - 0.5) * 2)
+        : THREE.MathUtils.lerp(lateTightR, ballEdgeR, ringProgress * 2);
+    this.timingOuterMesh.scale.setScalar(outerRadius);
 
     const hex = zone === 'green' ? 0x4ade80 : zone === 'yellow' ? 0xfacc15 : 0xf87171;
     this.timingOuterMat.color.setHex(hex);
-    this.timingTargetMat.color.setHex(zone === 'green' ? 0x4ade80 : hex);
-    this.timingTargetMat.opacity = zone === 'green' ? 0.9 : zone === 'yellow' ? 0.45 : 0.3;
+    this.timingOuterMat.opacity = inRange ? 0.96 : 0.76;
+
+    this.timingTargetMat.color.setHex(inRange && zone === 'green' ? 0x4ade80 : hex);
+    this.timingTargetMat.opacity = inRange
+      ? zone === 'green'
+        ? 0.95
+        : 0.65
+      : 0.25;
+
+    // Glow halo lights up unmistakably when ball is within hitting range
+    this.timingGlowMat.color.setHex(hex);
+    this.timingGlowMat.opacity = inRange ? (zone === 'green' ? 0.34 : 0.2) : 0.0;
+    this.timingGlowMesh.visible = inRange;
   }
 
   public getBallScreenTarget(
@@ -993,7 +1034,8 @@ export class SceneManager {
     isAimedAfterHit: boolean,
     activeTeamHex: number,
     activeTeamCss: string,
-    partnerPos?: THREE.Vector3
+    partnerPos?: THREE.Vector3,
+    enemyPositions: THREE.Vector3[] = []
   ): void {
     if (this.cameraViewMode === 'first_person' && !this.calibrateMode) {
       this.fpHints.netEdge = this.projectEdgeIndicator(
@@ -1008,9 +1050,17 @@ export class SceneManager {
             this.fpHints.partnerEdge.visible
           )
         : { visible: false, screenX: 0, screenY: 0, angleDeg: 0, teamColor: '#60a5fa' };
+      this.fpHints.enemyEdges = enemyPositions.map((pos, i) =>
+        this.projectEdgeIndicator(
+          new THREE.Vector3(pos.x, 1.45, pos.z),
+          '#ef4444',
+          this.fpHints.enemyEdges[i]?.visible ?? false
+        )
+      );
     } else {
       this.fpHints.netEdge.visible = false;
       this.fpHints.partnerEdge.visible = false;
+      for (const e of this.fpHints.enemyEdges) e.visible = false;
     }
 
     if (!isLive || ballPos.y <= OFFICIAL_BALL.radius + 0.01) {

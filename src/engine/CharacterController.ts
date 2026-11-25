@@ -295,25 +295,46 @@ export class CharacterController {
 
   private createNameplate(): void {
     if (typeof document === 'undefined') return;
+    // No player names overhead — only clean visual enemy / partner markers
+    if (this.isHuman) return;
+
+    const isEnemy = this.team === 'B';
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
+    canvas.width = 128;
+    canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
 
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
-    ctx.beginPath();
-    ctx.roundRect(16, 10, 224, 44, 14);
-    ctx.fill();
-
-    ctx.strokeStyle = this.isHuman ? '#facc15' : TEAM_COLORS[this.team].primary;
-    ctx.lineWidth = 4;
-    ctx.stroke();
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 26px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(this.config.profile.name, 128, 33);
+    ctx.clearRect(0, 0, 128, 128);
+    if (isEnemy) {
+      // High-contrast orange-red enemy chevron marker (no text)
+      ctx.shadowColor = 'rgba(239, 68, 68, 0.85)';
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#ef4444';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(64, 108);
+      ctx.lineTo(22, 34);
+      ctx.lineTo(64, 52);
+      ctx.lineTo(106, 34);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      // Subtle compact blue partner dot/chevron
+      ctx.shadowColor = 'rgba(56, 189, 248, 0.75)';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#38bdf8';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(64, 96);
+      ctx.lineTo(36, 48);
+      ctx.lineTo(92, 48);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
 
     const tex = new THREE.CanvasTexture(canvas);
     const sprite = new THREE.Sprite(
@@ -325,8 +346,9 @@ export class CharacterController {
       })
     );
     sprite.renderOrder = 99;
-    sprite.position.set(0, 2.02, 0);
-    sprite.scale.set(1.15, 0.29, 1);
+    sprite.position.set(0, 2.04, 0);
+    const size = isEnemy ? 0.42 : 0.28;
+    sprite.scale.set(size, size, 1);
     this.root.add(sprite);
   }
 

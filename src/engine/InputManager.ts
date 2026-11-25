@@ -19,6 +19,24 @@ export interface JoystickVisualState {
   isSprint: boolean;
 }
 
+export interface SwipeVisualState {
+  active: boolean;
+  startX: number;
+  startY: number;
+  curX: number;
+  curY: number;
+  onBall: boolean;
+  inRange: boolean;
+}
+
+export interface SwipeTarget {
+  x: number;
+  y: number;
+  radiusPx: number;
+  inRange: boolean;
+  allowAnywhere?: boolean;
+}
+
 export interface InputCallbacks {
   onSwipe: (swipe: SwipeEvent) => void;
   onBlockStart: () => void;
@@ -52,9 +70,19 @@ export class InputManager {
   private rightMaxDist = 0;
   private swipeSamples: { x: number; y: number; t: number }[] = [];
   private swipeFired = false;
+  private startedOnBall = false;
   private blockHoldTimer: number | null = null;
   private isHoldingBlock = false;
-  public getSwipeTarget: (() => { x: number; y: number; radiusPx: number } | null) | null = null;
+  public getSwipeTarget: (() => SwipeTarget | null) | null = null;
+  public swipeVisual: SwipeVisualState = {
+    active: false,
+    startX: 0,
+    startY: 0,
+    curX: 0,
+    curY: 0,
+    onBall: false,
+    inRange: false,
+  };
 
   // Desktop keyboard fallback
   private keys = new Set<string>();
@@ -118,6 +146,20 @@ export class InputManager {
       this.rightMaxDist = 0;
       this.swipeFired = false;
       this.swipeSamples = [{ x: e.clientX, y: e.clientY, t: now }];
+      const target = this.getSwipeTarget?.() ?? null;
+      this.startedOnBall =
+        target !== null &&
+        Math.hypot(e.clientX - target.x, e.clientY - target.y) <=
+          Math.max(target.radiusPx * 1.25, 112);
+      this.swipeVisual = {
+        active: this.startedOnBall || (target?.inRange ?? false),
+        startX: e.clientX,
+        startY: e.clientY,
+        curX: e.clientX,
+        curY: e.clientY,
+        onBall: this.startedOnBall,
+        inRange: target?.inRange ?? false,
+      };
 
       // Tap & Hold to Block after 130ms if finger hasn't swiped far
       this.blockHoldTimer = window.setTimeout(() => {
@@ -222,19 +264,33 @@ export class InputManager {
 
       if (!this.swipeFired && !this.isHoldingBlock) {
         const target = this.getSwipeTarget?.() ?? null;
-        const intersected =
-          target !== null &&
-          distFromStart >= 20 &&
-          this.segmentHitsCircle(
-            prev ? prev.x : this.rightStartX,
-            prev ? prev.y : this.rightStartY,
-            e.clientX,
-            e.clientY,
-            target.x,
-            target.y,
-            target.radiusPx
-          );
-        if (intersected || distFromStart >= 55) {
+        if (this.swipeVisual.active) {
+          this.swipeVisual.curX = e.clientX;
+          this.swipeVisual.curY = e.clientY;
+          this.swipeVisual.inRange = target?.inRange ?? false;
+        }
+        if (target && !target.allowAnywhere) {
+          // Live ball hitting: touch the ball and swipe in your desired direction when in range
+          const hitOnBall = this.startedOnBall && target.inRange && distFromStart >= 46;
+          const swipedThroughBall =
+            !this.startedOnBall &&
+            target.inRange &&
+            distFromStart >= 30 &&
+            this.segmentHitsCircle(
+              prev ? prev.x : this.rightStartX,
+              prev ? prev.y : this.rightStartY,
+              e.clientX,
+              e.clientY,
+              target.x,
+              target.y,
+              Math.max(target.radiusPx * 1.15, 88)
+            );
+          if (hitOnBall || swipedThroughBall) {
+            this.swipeVisual.active = false;
+            this.emitBufferedSwipe(now, e.clientX, e.clientY);
+          }
+        } else if (distFromStart >= 55) {
+          this.swipeVisual.active = false;
           this.emitBufferedSwipe(now, e.clientX, e.clientY);
         }
       }
@@ -254,14 +310,21 @@ export class InputManager {
         this.blockHoldTimer = null;
       }
 
+      this.swipeVisual.active = false;
       if (this.isHoldingBlock) {
         this.isHoldingBlock = false;
         this.callbacks.onBlockEnd();
       } else if (!this.swipeFired) {
-        const now = performance.now();
-        this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });
-        this.emitBufferedSwipe(now, e.clientX, e.clientY);
+        const target = this.getSwipeTarget?.() ?? null;
+        const canFireOnRelease =
+          !target || target.allowAnywhere || target.inRange;
+        if (canFireOnRelease) {
+          const now = performance.now();
+          this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });
+          this.emitBufferedSwipe(now, e.clientX, e.clientY);
+        }
       }
+      this.startedOnBall = false;
       this.swipeSamples = [];
       this.rightPointerId = null;
     }

@@ -13,6 +13,7 @@ export interface ContactTiming {
   zone: ContactZone;
   timing: TimingQuality;
   ringProgress: number;
+  inRange: boolean;
 }
 
 export interface ShotOutcome {
@@ -143,20 +144,26 @@ export class ShotResolver {
     }
 
     const signedDt = tHoriz > 0.08 ? Math.max(tHoriz, dtVert) : dtVert;
-    const outOfSweetRange =
-      ballPos.y > MAX_HITTING_HEIGHT + 0.08 ||
-      ballPos.y < 0.24 ||
-      horizDist > 1.75;
+    const inRange =
+      horizDist <= 2.65 &&
+      ballPos.y >= 0.18 &&
+      ballPos.y <= MAX_HITTING_HEIGHT + 0.16;
 
     let zone: ContactZone;
     let timing: TimingQuality;
-    if (outOfSweetRange) {
-      zone = 'red';
-      timing = 'Bad';
-    } else if (signedDt >= -0.095 && signedDt <= 0.115) {
+    if (!inRange) {
+      zone = horizDist <= 3.55 && ballPos.y <= MAX_HITTING_HEIGHT + 0.6 ? 'yellow' : 'red';
+      timing = 'Early';
+    } else if (
+      horizDist <= 2.4 &&
+      ballPos.y >= 0.5 &&
+      ballPos.y <= 1.88 &&
+      signedDt >= -0.14 &&
+      signedDt <= 0.28
+    ) {
       zone = 'green';
       timing = 'Perfect';
-    } else if (signedDt >= -0.22 && signedDt <= 0.25) {
+    } else if (signedDt >= -0.25 && signedDt <= 0.48 && ballPos.y >= 0.26) {
       zone = 'yellow';
       timing = signedDt > 0 ? 'Early' : 'Late';
     } else {
@@ -164,12 +171,23 @@ export class ShotResolver {
       timing = 'Bad';
     }
 
+    // Continuous shrinking ring progress (1.0 far/early -> 0.5 sweet spot -> 0.0 late)
+    const distEarly = THREE.MathUtils.clamp((horizDist - 1.15) / 3.35, 0, 1);
+    const timeEarly = THREE.MathUtils.clamp(signedDt / 0.72, 0, 1);
+    const earlyFactor = Math.max(distEarly, timeEarly);
+    const lateFactor = signedDt < 0 ? THREE.MathUtils.clamp(-signedDt / 0.26, 0, 1) : 0;
+    const ringProgress =
+      lateFactor > 0 && horizDist < 2.2
+        ? THREE.MathUtils.lerp(0.5, 0.0, lateFactor)
+        : THREE.MathUtils.lerp(0.5, 1.0, earlyFactor);
+
     return {
       offset: THREE.MathUtils.clamp(-signedDt / 0.35, -1, 1),
-      quality01: THREE.MathUtils.clamp(1 - Math.abs(signedDt) / 0.34, 0.05, 1),
+      quality01: THREE.MathUtils.clamp(1 - Math.abs(signedDt) / 0.38, 0.05, 1),
       zone,
       timing,
-      ringProgress: THREE.MathUtils.clamp(0.5 + signedDt / 0.6, 0, 1),
+      ringProgress,
+      inRange,
     };
   }
 
@@ -193,16 +211,16 @@ export class ShotResolver {
     precomputedTiming?: ContactTiming
   ): ShotOutcome | null {
     const horizDist = Math.hypot(ballPos.x - player.position.x, ballPos.z - player.position.z);
-    const baseReach = player.getEffectiveReach();
-    // Auto-dive ONLY when ball is slightly out of normal reach and player swipes
+    const baseReach = Math.max(player.getEffectiveReach(), 2.35);
+    // Auto-dive ONLY when ball is near the outer edge of hitting range
     const shouldAutoDive =
-      horizDist > baseReach * 0.92 &&
-      horizDist <= baseReach + 0.85 &&
-      ballPos.y <= MAX_HITTING_HEIGHT + 0.12;
+      horizDist > baseReach * 0.94 &&
+      horizDist <= baseReach + 0.65 &&
+      ballPos.y <= MAX_HITTING_HEIGHT + 0.16;
 
-    const maxReach = baseReach + (shouldAutoDive ? 0.85 : 0);
+    const maxReach = baseReach + (shouldAutoDive ? 0.65 : 0);
     // Can hit on the way up OR down unless ball is above hitting height!
-    if (horizDist > maxReach || ballPos.y > MAX_HITTING_HEIGHT + 0.12) {
+    if (horizDist > maxReach || ballPos.y > MAX_HITTING_HEIGHT + 0.16) {
       return null;
     }
 

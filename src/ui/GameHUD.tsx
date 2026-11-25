@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CourtOffsetConfig, IntroCameraStyle } from '../config/maps';
-import { JoystickVisualState } from '../engine/InputManager';
+import { JoystickVisualState, SwipeVisualState } from '../engine/InputManager';
 import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
 import { FirstPersonHints, OffscreenLandingHint } from '../engine/SceneManager';
 import { CalibratorPanel, CalibratorTab } from './CalibratorPanel';
@@ -12,6 +12,8 @@ interface GameHUDProps {
   popups: TimingPopup[];
   offscreenLanding: OffscreenLandingHint;
   fpHints: FirstPersonHints;
+  ballInRange: boolean;
+  swipeVisual: SwipeVisualState;
   stance: 'close' | 'away';
   onToggleStance: () => void;
   isHumanBlocking: boolean;
@@ -45,6 +47,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   popups,
   offscreenLanding,
   fpHints,
+  ballInRange,
+  swipeVisual,
   stance,
   onToggleStance,
   isHumanBlocking,
@@ -90,7 +94,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         <div className="match-meta">
           <div className="meta-row">
             <span className="badge server-badge">
-              {hud.serverName} · {hud.serveAttempt === 1 ? '1st' : '2nd'} Serve
+              {hud.isHumanServing
+                ? 'YOUR SERVE'
+                : hud.servingTeam === 'A'
+                  ? 'PARTNER SERVE'
+                  : 'ENEMY SERVE'}{' '}
+              · {hud.serveAttempt === 1 ? '1st' : '2nd'}
             </span>
           </div>
           <div className="meta-row">
@@ -98,13 +107,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               <span
                 className={`touch-counter team-ball-${hud.possessionTeam.toLowerCase()}`}
               >
-                {hud.possessionTeam === 'A' ? 'BLUE BALL' : 'ORANGE BALL'} · HIT{' '}
+                {hud.possessionTeam === 'A' ? 'YOUR BALL' : 'ENEMY BALL'} ·{' '}
                 {Math.min(3, hud.teamTouches + 1)}/3
-                {hud.isFirstPossessionAfterServe ? ' (3 req)' : ''}
               </span>
             ) : (
               <span className="touch-counter">
-                {hud.isHumanServing ? 'Swipe Up on Right to Toss' : 'Ready'}
+                {hud.isHumanServing ? 'Swipe Up to Toss' : 'Ready'}
               </span>
             )}
           </div>
@@ -215,6 +223,77 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
+      {/* 1st-Person Enemy Edge Trackers (compact diamond + arrow, no text names) */}
+      {cameraViewMode === 'first_person' &&
+        fpHints.enemyEdges.map((edge, idx) =>
+          edge.visible ? (
+            <div
+              key={idx}
+              className="fp-edge-badge enemy-edge"
+              style={{
+                left: edge.screenX,
+                top: edge.screenY,
+              }}
+            >
+              <span>◆</span>
+              <span
+                className="fp-edge-arrow"
+                style={{ transform: `rotate(${edge.angleDeg}deg)` }}
+              >
+                ➤
+              </span>
+            </div>
+          ) : null
+        )}
+
+      {/* Clean In-Range Indicator */}
+      {ballInRange && !hud.serveMeterActive && (
+        <div className="in-range-pill">IN RANGE</div>
+      )}
+
+      {/* Touch-Ball Directional Swipe Aim Vector */}
+      {swipeVisual.active &&
+        Math.hypot(swipeVisual.curX - swipeVisual.startX, swipeVisual.curY - swipeVisual.startY) >
+          10 && (
+          <svg className="swipe-aim-svg" aria-hidden="true">
+            <defs>
+              <marker
+                id="swipe-arrowhead"
+                markerWidth="8"
+                markerHeight="8"
+                refX="6"
+                refY="4"
+                orient="auto"
+              >
+                <path
+                  d="M 0 0 L 8 4 L 0 8 z"
+                  fill={swipeVisual.inRange ? '#4ade80' : '#facc15'}
+                />
+              </marker>
+            </defs>
+            <circle
+              cx={swipeVisual.startX}
+              cy={swipeVisual.startY}
+              r={10}
+              fill="none"
+              stroke={swipeVisual.inRange ? '#4ade80' : '#facc15'}
+              strokeWidth="3"
+              opacity="0.85"
+            />
+            <line
+              x1={swipeVisual.startX}
+              y1={swipeVisual.startY}
+              x2={swipeVisual.curX}
+              y2={swipeVisual.curY}
+              stroke={swipeVisual.inRange ? '#4ade80' : '#facc15'}
+              strokeWidth="4"
+              strokeLinecap="round"
+              markerEnd="url(#swipe-arrowhead)"
+              opacity="0.9"
+            />
+          </svg>
+        )}
+
       {/* Bottom-Left Stance Toggle (1st-Person auto-runner mode) */}
       {cameraViewMode === 'first_person' && (
         <div className="bottom-left-cluster">
@@ -258,12 +337,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Subtle Touch Hint on Bottom Right */}
-      <div className="right-zone-hint">
-        {cameraViewMode === 'first_person'
-          ? 'Swipe Anywhere: Up = Set · Cut/Down = Hit Net · Hold = Block'
-          : 'Swipe: Hit / Set / Spike · Hold: Block'}
-      </div>
+      {/* Subtle Touch Hint on Bottom Right (Press-Box only; keep 1st-Person clean) */}
+      {cameraViewMode !== 'first_person' && (
+        <div className="right-zone-hint">Swipe: Hit / Set / Spike · Hold: Block</div>
+      )}
 
       <MenuDrawer
         open={menuOpen}
