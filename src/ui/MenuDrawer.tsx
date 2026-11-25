@@ -185,22 +185,19 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
           <h3>Touch Controls</h3>
           <ul className="controls-list">
             <li>
-              <strong>Left Thumb Joystick:</strong> Inner ring (0–55%) = Walk · Outer ring (55–100%) = Sprint (drains Stamina)
+              <strong>Auto-Runner + Stance:</strong> Your player runs automatically in every view. Tap <strong>CLOSE / AWAY</strong> to play tighter or deeper.
             </li>
             <li>
-              <strong>Return to Net Button:</strong> Auto-sprints to defensive net spacing (~2.5 m)
+              <strong>Touch &amp; Swipe Direction:</strong> Touch the ball when <strong>IN RANGE</strong> (green ring) and swipe in the direction you want to hit.
             </li>
             <li>
-              <strong>Right Swipe Up:</strong> Toss Serve · Set (Touches 1–2) · Rainbow/Drop Shot (Touch 3)
+              <strong>Swipe Up (±45°):</strong> Toss Serve · Set forward to partner (Touches 1–2) · High Lob (Touch 3)
             </li>
             <li>
-              <strong>Right Swipe Down:</strong> Overhead Spike (near net) · Fast Drive Serve
+              <strong>Sideways / Down Swipe:</strong> Side-to-side = Low Cut · Downward = Steep Spike
             </li>
             <li>
-              <strong>Right Tap &amp; Hold:</strong> Raised-Arms Block at Net
-            </li>
-            <li>
-              <strong>Auto-Dive:</strong> Sprint toward a low falling ball + Right Swipe
+              <strong>Tap &amp; Hold:</strong> Raised-Arms Block at Net
             </li>
           </ul>
         </div>

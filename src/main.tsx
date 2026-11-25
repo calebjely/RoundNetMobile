@@ -15,7 +15,7 @@ import {
   persistCourtConfig,
 } from './config/maps';
 import { CharacterController } from './engine/CharacterController';
-import { InputManager, JoystickVisualState, SwipeVisualState } from './engine/InputManager';
+import { InputManager, SwipeVisualState } from './engine/InputManager';
 import { FeedEntry, MatchHUDState, MatchManager, TimingPopup } from './engine/MatchManager';
 import { PhysicsWorld } from './engine/PhysicsWorld';
 import {
@@ -34,15 +34,6 @@ const App: React.FC = () => {
   const initialSaved = useRef(loadLocalCourtConfig(mapConfig));
 
   const [hud, setHud] = useState<MatchHUDState | null>(null);
-  const [joystick, setJoystick] = useState<JoystickVisualState>({
-    active: false,
-    originX: 0,
-    originY: 0,
-    thumbX: 0,
-    thumbY: 0,
-    deflection: 0,
-    isSprint: false,
-  });
   const [popups, setPopups] = useState<TimingPopup[]>([]);
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [offscreenLanding, setOffscreenLanding] = useState<OffscreenLandingHint>({
@@ -68,7 +59,6 @@ const App: React.FC = () => {
     inRange: false,
   });
   const [stance, setStance] = useState<'close' | 'away'>('close');
-  const [returnToNetActive, setReturnToNetActive] = useState(false);
   const [calibrateMode, setCalibrateMode] = useState(
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
@@ -191,7 +181,7 @@ const App: React.FC = () => {
         playerSpeedRef.current = remote.playerSpeed;
         human.root.visible = remote.cameraViewMode !== 'first_person';
         if (inputMgr) {
-          inputMgr.fullScreenSwipe = remote.cameraViewMode === 'first_person';
+          inputMgr.fullScreenSwipe = true;
         }
       });
 
@@ -247,16 +237,14 @@ const App: React.FC = () => {
           if (engineRef.current) {
             engineRef.current.returnToNet = false;
           }
-          setReturnToNetActive(false);
         },
       });
       inputMgr.enabled = !initialCalibrate;
-      inputMgr.fullScreenSwipe = sceneMgr.getCameraViewMode() === 'first_person';
+      inputMgr.fullScreenSwipe = true;
       inputMgr.getSwipeTarget = () => {
         if (
           matchMgr.phase === 'SERVE_WAIT_TOSS' ||
-          matchMgr.phase === 'SERVE_METER_ACTIVE' ||
-          sceneMgr.getCameraViewMode() !== 'first_person'
+          matchMgr.phase === 'SERVE_METER_ACTIVE'
         ) {
           return null;
         }
@@ -326,55 +314,10 @@ const App: React.FC = () => {
         const speedMult = physicsSpeedRef.current;
         const simDt = rawDt * speedMult;
 
-        // Human movement (Joystick or Return-to-Net auto-sprint)
-        let { dir, deflection } = inputMgr.getMoveIntent();
-        if (deflection > 0.04) {
-          sceneMgr.skipIntroSpin();
-          const camForward = new THREE.Vector3();
-          sceneMgr.camera.getWorldDirection(camForward);
-          camForward.y = 0;
-          if (camForward.lengthSq() > 0.0001) {
-            camForward.normalize();
-          } else {
-            camForward.set(0, 0, -1);
-          }
-          const camRight = new THREE.Vector3()
-            .crossVectors(camForward, new THREE.Vector3(0, 1, 0))
-            .normalize();
-
-          const worldX = camRight.x * dir.x + camForward.x * -dir.y;
-          const worldZ = camRight.z * dir.x + camForward.z * -dir.y;
-          dir.set(worldX, worldZ).normalize();
-        }
-        const isPreServe =
-          matchMgr.phase === 'SERVE_WAIT_TOSS' || matchMgr.phase === 'SERVE_METER_ACTIVE';
+        // Auto-runner across ALL camera views (Press Box, Follow Behind, 1st Person):
+        // character automatically runs to play; gameplay centers on timing & swipe direction!
         const plrSpd = playerSpeedRef.current;
-
-        if (sceneMgr.getCameraViewMode() === 'first_person') {
-          // 1st-Person Auto-Runner: character automatically runs & positions; user only swipes!
-          bots.updateHumanAutoMove(simDt, plrSpd, stanceRef.current);
-        } else {
-          if (engineRef.current?.returnToNet && deflection < 0.05) {
-            const curR = Math.hypot(human.position.x, human.position.z);
-            const curAngle = curR > 0.01 ? Math.atan2(human.position.x, human.position.z) : 0;
-            const desiredRadius = isPreServe ? 2.66 : 0.68;
-            const target = new THREE.Vector3(
-              Math.sin(curAngle) * desiredRadius,
-              0,
-              Math.cos(curAngle) * desiredRadius
-            );
-            const toTarget = target.sub(human.position);
-            const dist = Math.hypot(toTarget.x, toTarget.z);
-            if (dist > 0.16) {
-              dir.set(toTarget.x / dist, toTarget.z / dist);
-              deflection = 0.92;
-            } else {
-              engineRef.current.returnToNet = false;
-              setReturnToNetActive(false);
-            }
-          }
-          human.update(simDt, dir, deflection, isPreServe, plrSpd);
-        }
+        bots.updateHumanAutoMove(simDt, plrSpd, stanceRef.current);
 
         bots.update(simDt, plrSpd);
 
@@ -469,7 +412,6 @@ const App: React.FC = () => {
           hudSyncAccum = 0;
           setHud(matchMgr.getHUDState());
           setFeed([...matchMgr.feed]);
-          setJoystick({ ...inputMgr.joystickState });
           setPopups([...matchMgr.popups]);
           setOffscreenLanding(sceneMgr.getOffscreenLandingHint());
           setFpHints(sceneMgr.getFirstPersonHints());
@@ -528,7 +470,7 @@ const App: React.FC = () => {
     if (inst) {
       inst.sceneMgr.setCameraViewMode(mode);
       inst.human.root.visible = mode !== 'first_person';
-      inst.inputMgr.fullScreenSwipe = mode === 'first_person';
+      inst.inputMgr.fullScreenSwipe = true;
       scheduleAutoSave();
     }
   };
@@ -546,7 +488,6 @@ const App: React.FC = () => {
         <GameHUD
           hud={hud}
           feed={feed}
-          joystick={joystick}
           popups={popups}
           offscreenLanding={offscreenLanding}
           fpHints={fpHints}
@@ -559,13 +500,6 @@ const App: React.FC = () => {
             setStance(next);
           }}
           isHumanBlocking={isHumanBlocking}
-          returnToNetActive={returnToNetActive}
-          onReturnToNetPress={(active) => {
-            if (engineRef.current) {
-              engineRef.current.returnToNet = active;
-            }
-            setReturnToNetActive(active);
-          }}
           onResetRally={() => engineRef.current?.matchMgr.resetRally()}
           onResetMatch={(pts) => {
             engineRef.current?.matchMgr.resetMatch(pts);

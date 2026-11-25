@@ -5,7 +5,7 @@ import {
   CourtOffsetConfig,
   IntroCameraStyle,
 } from '../config/maps';
-import { JoystickVisualState, SwipeVisualState } from '../engine/InputManager';
+import { SwipeVisualState } from '../engine/InputManager';
 import { FeedEntry, MatchHUDState, TimingPopup } from '../engine/MatchManager';
 import { FirstPersonHints, OffscreenLandingHint } from '../engine/SceneManager';
 import { CalibratorPanel, CalibratorTab } from './CalibratorPanel';
@@ -14,7 +14,6 @@ import { MenuDrawer } from './MenuDrawer';
 interface GameHUDProps {
   hud: MatchHUDState;
   feed: FeedEntry[];
-  joystick: JoystickVisualState;
   popups: TimingPopup[];
   offscreenLanding: OffscreenLandingHint;
   fpHints: FirstPersonHints;
@@ -23,8 +22,6 @@ interface GameHUDProps {
   stance: 'close' | 'away';
   onToggleStance: () => void;
   isHumanBlocking: boolean;
-  returnToNetActive: boolean;
-  onReturnToNetPress: (active: boolean) => void;
   onResetRally: () => void;
   onResetMatch: (pointsToWin: 15 | 21) => void;
   calibrateMode: boolean;
@@ -50,7 +47,6 @@ interface GameHUDProps {
 export const GameHUD: React.FC<GameHUDProps> = ({
   hud,
   feed,
-  joystick,
   popups,
   offscreenLanding,
   fpHints,
@@ -59,8 +55,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   stance,
   onToggleStance,
   isHumanBlocking,
-  returnToNetActive,
-  onReturnToNetPress,
   onResetRally,
   onResetMatch,
   calibrateMode,
@@ -303,53 +297,18 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </svg>
         )}
 
-      {/* Bottom-Left Stance Toggle (1st-Person auto-runner mode) */}
-      {cameraViewMode === 'first_person' && (
-        <div className="bottom-left-cluster">
-          <button
-            data-ui-interactive="true"
-            className={`stance-btn retro-circle-btn ${stance === 'close' ? 'is-close' : 'is-away'}`}
-            onClick={onToggleStance}
-            aria-label={`Play stance: ${stance}`}
-          >
-            <span className="stance-btn-title">{stance === 'close' ? 'CLOSE' : 'AWAY'}</span>
-            <span className="stance-btn-sub">STANCE</span>
-          </button>
-        </div>
-      )}
-
-      {/* Bottom-Left Persistent 3D Arcade Cluster (Press Box & Follow Behind modes) */}
-      {cameraViewMode !== 'first_person' && (
-        <div className="bottom-left-cluster">
-          <button
-            data-ui-interactive="true"
-            className={`return-net-btn retro-circle-btn ${returnToNetActive ? 'active' : ''}`}
-            onPointerDown={() => onReturnToNetPress(true)}
-            onPointerUp={() => onReturnToNetPress(false)}
-            onPointerCancel={() => onReturnToNetPress(false)}
-            aria-label="Move to net"
-          >
-            <span className="circle-btn-icon">◎</span>
-          </button>
-
-          <div id="persistent-joystick-base" className="joystick-base-3d">
-            <div className="joystick-walk-ring" />
-            <div
-              className={`joystick-thumb-3d ${joystick.isSprint ? 'sprint' : ''}`}
-              style={{
-                transform: joystick.active
-                  ? `translate(${joystick.thumbX - joystick.originX}px, ${joystick.thumbY - joystick.originY}px)`
-                  : 'translate(0px, 0px)',
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Subtle Touch Hint on Bottom Right (Press-Box only; keep 1st-Person clean) */}
-      {cameraViewMode !== 'first_person' && (
-        <div className="right-zone-hint">Swipe: Hit / Set / Spike · Hold: Block</div>
-      )}
+      {/* Bottom-Left Stance Toggle (All camera views use auto-runner) */}
+      <div className="bottom-left-cluster">
+        <button
+          data-ui-interactive="true"
+          className={`stance-btn retro-circle-btn ${stance === 'close' ? 'is-close' : 'is-away'}`}
+          onClick={onToggleStance}
+          aria-label={`Play stance: ${stance}`}
+        >
+          <span className="stance-btn-title">{stance === 'close' ? 'CLOSE' : 'AWAY'}</span>
+          <span className="stance-btn-sub">STANCE</span>
+        </button>
+      </div>
 
       <MenuDrawer
         open={menuOpen}
