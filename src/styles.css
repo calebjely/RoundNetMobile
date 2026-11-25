@@ -256,12 +256,31 @@ body,
   margin-bottom: 6px;
 }
 
-.serve-meter-bar {
+.timing-tri-bar {
   position: relative;
   height: 16px;
-  background: #334155;
+  background: #dc2626; /* Outer Red = Bad Hit */
   border-radius: 8px;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.tri-yellow {
+  position: absolute;
+  left: 22%;
+  width: 56%;
+  top: 0;
+  bottom: 0;
+  background: #eab308; /* Mid Yellow = Okay / Potential Hit */
+}
+
+.tri-green {
+  position: absolute;
+  left: 38%;
+  width: 24%;
+  top: 0;
+  bottom: 0;
+  background: #22c55e; /* Center Green = Perfect Hit */
 }
 
 .serve-meter-sweet {

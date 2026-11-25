@@ -139,8 +139,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {hud.serveMeterActive && (
         <div className="serve-meter-wrap">
           <div className="serve-meter-label">SWIPE TO SERVE!</div>
-          <div className="serve-meter-bar">
-            <div className="serve-meter-sweet" />
+          <div className="timing-tri-bar">
+            <div className="tri-yellow" />
+            <div className="tri-green" />
             <div
               className="serve-meter-cursor"
               style={{ left: `${hud.serveMeterValue * 100}%` }}
@@ -213,12 +214,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Ball-Approach Hit Timing Bar (shown when ball is close enough to swing) */}
+      {/* Ball-Approach Hit Timing Bar (Red / Yellow / Green) */}
       {hitTimingBar.visible && !hud.serveMeterActive && (
         <div className="hit-timing-wrap">
           <div className="hit-timing-label">SWIPE TO HIT</div>
-          <div className="serve-meter-bar">
-            <div className="serve-meter-sweet" />
+          <div className="timing-tri-bar">
+            <div className="tri-yellow" />
+            <div className="tri-green" />
             <div
               className="serve-meter-cursor"
               style={{ left: `${hitTimingBar.value * 100}%` }}
