@@ -6,7 +6,10 @@ import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import { IRF_2026_RULES } from '../config/rules';
 import {
   CameraPreset,
+  CameraViewMode,
+  CameraViewSettings,
   CourtOffsetConfig,
+  getDefaultSavedConfig,
   IntroCameraStyle,
   MapConfig,
   SavedCourtConfig,
@@ -83,18 +86,19 @@ export class SceneManager {
   private readonly mapConfig: MapConfig;
   private courtOffset: CourtOffsetConfig;
   private serveCameras: [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
-  private activeServeSlot = 0;
   private calibrateMode = false;
   private calibrateTab: 'camera' | 'net' = 'camera';
-  private calibrateServeSlot = 0;
-  private cameraViewMode: 'pressbox' | 'first_person' = 'first_person';
+  private cameraViewMode: CameraViewMode = 'first_person';
+  private viewSettings: CameraViewSettings;
   private netPointers = new Map<number, { x: number; y: number }>();
   private netPrevPinchDist = 0;
   private onCourtOffsetSync?: (offset: CourtOffsetConfig) => void;
   private onCameraPresetChanged?: () => void;
 
-  // 1st-Person Swinging Arm + Edge Indicators
-  private fpArmPivot!: THREE.Group;
+  // 1st-Person Swinging Arms (Left + Right) + Edge Indicators
+  private fpLeftArmPivot!: THREE.Group;
+  private fpRightArmPivot!: THREE.Group;
+  private fpActiveArm: 'left' | 'right' = 'right';
   private fpSwingElapsed = -1;
   private fpSwingDuration = 0.28;
   private fpSwingDir = new THREE.Vector2(0, -1);
@@ -174,6 +178,21 @@ export class SceneManager {
       target: [...c.target] as [number, number, number],
     })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
 
+    const fallbackView = getDefaultSavedConfig(mapConfig).cameraViewSettings;
+    const initView = savedConfig?.cameraViewSettings ?? fallbackView;
+    this.viewSettings = {
+      pressbox: {
+        position: [...initView.pressbox.position],
+        target: [...initView.pressbox.target],
+      },
+      pressboxZoom: initView.pressboxZoom,
+      followBehindDist: initView.followBehindDist,
+      followBehindHeight: initView.followBehindHeight,
+      fpEyeHeight: initView.fpEyeHeight,
+      fpFov: initView.fpFov,
+    };
+    this.cameraViewMode = savedConfig?.cameraViewMode ?? 'first_person';
+
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x9ec5e8);
     this.scene.fog = new THREE.Fog(0x9ec5e8, 28, 70);
@@ -181,9 +200,11 @@ export class SceneManager {
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
 
-    this.camera = new THREE.PerspectiveCamera(mapConfig.fov, width / height, 0.1, 150);
-    this.baseCamPos = new THREE.Vector3(...this.serveCameras[0].position);
-    this.baseCamTarget = new THREE.Vector3(...this.serveCameras[0].target);
+    const initialFov =
+      this.cameraViewMode === 'first_person' ? this.viewSettings.fpFov : mapConfig.fov;
+    this.camera = new THREE.PerspectiveCamera(initialFov, width / height, 0.1, 150);
+    this.baseCamPos = new THREE.Vector3(...this.viewSettings.pressbox.position);
+    this.baseCamTarget = new THREE.Vector3(...this.viewSettings.pressbox.target);
     this.currentCamPos.copy(this.baseCamPos);
     this.currentCamTarget.copy(this.baseCamTarget);
     this.camera.position.copy(this.baseCamPos);
@@ -702,35 +723,41 @@ export class SceneManager {
   }
 
   private createFirstPersonArm(): void {
-    const pivot = new THREE.Group();
-    pivot.position.set(0.28, -0.26, -0.34);
-    pivot.visible = this.cameraViewMode === 'first_person';
-
     const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x3b82f6, roughness: 0.55 });
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xe8be9e, roughness: 0.6 });
 
-    const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.24, 6, 10), skinMat);
-    forearm.rotation.x = Math.PI * 0.42;
-    forearm.position.set(0, 0.04, -0.14);
-    pivot.add(forearm);
+    const buildArm = (sideSign: -1 | 1): THREE.Group => {
+      const pivot = new THREE.Group();
+      pivot.position.set(sideSign * 0.28, -0.26, -0.34);
+      pivot.visible = this.cameraViewMode === 'first_person';
 
-    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.12, 6, 10), sleeveMat);
-    sleeve.rotation.x = Math.PI * 0.42;
-    sleeve.position.set(0, -0.02, -0.02);
-    pivot.add(sleeve);
+      const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, 0.24, 6, 10), skinMat);
+      forearm.rotation.x = Math.PI * 0.42;
+      forearm.position.set(0, 0.04, -0.14);
+      pivot.add(forearm);
 
-    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.032, 0.11), skinMat);
-    hand.position.set(0, 0.09, -0.28);
-    pivot.add(hand);
+      const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.12, 6, 10), sleeveMat);
+      sleeve.rotation.x = Math.PI * 0.42;
+      sleeve.position.set(0, -0.02, -0.02);
+      pivot.add(sleeve);
 
-    this.fpArmPivot = pivot;
-    this.camera.add(pivot);
+      const hand = new THREE.Mesh(new THREE.BoxGeometry(0.082, 0.03, 0.105), skinMat);
+      hand.position.set(0, 0.09, -0.28);
+      pivot.add(hand);
+
+      this.camera.add(pivot);
+      return pivot;
+    };
+
+    this.fpLeftArmPivot = buildArm(-1);
+    this.fpRightArmPivot = buildArm(1);
   }
 
   public triggerFirstPersonSwing(dx: number, dy: number, speedPx: number): void {
     if (this.cameraViewMode !== 'first_person') return;
     const len = Math.max(1, Math.hypot(dx, dy));
     this.fpSwingDir.set(dx / len, dy / len);
+    this.fpActiveArm = dx < -18 ? 'left' : 'right';
     this.fpSwingDuration = THREE.MathUtils.clamp(0.34 - speedPx * 0.0001, 0.18, 0.34);
     this.fpSwingElapsed = 0;
   }
@@ -740,9 +767,12 @@ export class SceneManager {
   }
 
   public updateFirstPersonArm(dt: number): void {
-    if (!this.fpArmPivot) return;
-    const show = this.cameraViewMode === 'first_person' && !this.calibrateMode;
-    this.fpArmPivot.visible = show;
+    if (!this.fpLeftArmPivot || !this.fpRightArmPivot) return;
+    const show =
+      this.cameraViewMode === 'first_person' &&
+      !(this.calibrateMode && this.calibrateTab === 'net');
+    this.fpLeftArmPivot.visible = show;
+    this.fpRightArmPivot.visible = show;
     if (!show) return;
 
     if (this.fpSwingElapsed >= 0) {
@@ -752,28 +782,47 @@ export class SceneManager {
       const sx = this.fpSwingDir.x;
       const sy = this.fpSwingDir.y;
 
-      this.fpArmPivot.position.set(
-        0.26 + sx * swingCurve * 0.24,
+      const isLeft = this.fpActiveArm === 'left';
+      const activePivot = isLeft ? this.fpLeftArmPivot : this.fpRightArmPivot;
+      const offPivot = isLeft ? this.fpRightArmPivot : this.fpLeftArmPivot;
+      const activeSign = isLeft ? -1 : 1;
+      const offSign = -activeSign;
+
+      activePivot.position.set(
+        activeSign * 0.26 + sx * swingCurve * 0.24,
         -0.24 - sy * swingCurve * 0.22,
-        -0.34 - swingCurve * 0.2
+        -0.34 - swingCurve * 0.22
       );
-      this.fpArmPivot.rotation.set(
+      activePivot.rotation.set(
         -sy * swingCurve * 0.95,
         -sx * swingCurve * 1.15,
         -sx * swingCurve * 0.65
       );
+
+      // Off-hand subtly stabilizes during swing
+      offPivot.position.lerp(
+        new THREE.Vector3(offSign * 0.3, -0.29, -0.32),
+        1 - Math.exp(-dt * 12)
+      );
+      offPivot.rotation.set(-swingCurve * 0.15, 0, offSign * swingCurve * 0.15);
+
       if (t >= 1) {
         this.fpSwingElapsed = -1;
       }
       return;
     }
 
+    const rate = 1 - Math.exp(-dt * (this.fpBlocking ? 14 : 10));
     if (this.fpBlocking) {
-      this.fpArmPivot.position.lerp(new THREE.Vector3(0.14, -0.06, -0.36), 1 - Math.exp(-dt * 14));
-      this.fpArmPivot.rotation.set(0.65, 0.3, 0.2);
+      this.fpLeftArmPivot.position.lerp(new THREE.Vector3(-0.15, -0.06, -0.36), rate);
+      this.fpLeftArmPivot.rotation.set(0.65, -0.25, -0.18);
+      this.fpRightArmPivot.position.lerp(new THREE.Vector3(0.15, -0.06, -0.36), rate);
+      this.fpRightArmPivot.rotation.set(0.65, 0.25, 0.18);
     } else {
-      this.fpArmPivot.position.lerp(new THREE.Vector3(0.28, -0.26, -0.34), 1 - Math.exp(-dt * 10));
-      this.fpArmPivot.rotation.set(0, 0, 0);
+      this.fpLeftArmPivot.position.lerp(new THREE.Vector3(-0.28, -0.26, -0.34), rate);
+      this.fpLeftArmPivot.rotation.set(0, 0, 0);
+      this.fpRightArmPivot.position.lerp(new THREE.Vector3(0.28, -0.26, -0.34), rate);
+      this.fpRightArmPivot.rotation.set(0, 0, 0);
     }
   }
 
@@ -1253,66 +1302,110 @@ export class SceneManager {
       position: [...c.position] as [number, number, number],
       target: [...c.target] as [number, number, number],
     })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
-    const preset = this.serveCameras[this.activeServeSlot] ?? this.serveCameras[0];
-    this.baseCamPos.set(...preset.position);
-    this.baseCamTarget.set(...preset.target);
-    if (this.calibrateMode && this.calibrateTab === 'camera') {
-      const calPreset = this.serveCameras[this.calibrateServeSlot];
-      this.camera.position.set(...calPreset.position);
-      this.orbitControls.target.set(...calPreset.target);
-      this.orbitControls.update();
+    this.viewSettings = {
+      pressbox: {
+        position: [...cfg.cameraViewSettings.pressbox.position],
+        target: [...cfg.cameraViewSettings.pressbox.target],
+      },
+      pressboxZoom: cfg.cameraViewSettings.pressboxZoom,
+      followBehindDist: cfg.cameraViewSettings.followBehindDist,
+      followBehindHeight: cfg.cameraViewSettings.followBehindHeight,
+      fpEyeHeight: cfg.cameraViewSettings.fpEyeHeight,
+      fpFov: cfg.cameraViewSettings.fpFov,
+    };
+    this.setCameraViewMode(cfg.cameraViewMode);
+    this.baseCamPos.set(...this.viewSettings.pressbox.position);
+    this.baseCamTarget.set(...this.viewSettings.pressbox.target);
+    if (this.calibrateMode && this.calibrateTab === 'camera' && this.cameraViewMode === 'pressbox') {
+      this.syncPressboxOrbitFromSettings();
     }
   }
 
-  public setActiveServeCamera(slotIndex: number): void {
-    const idx = ((slotIndex % 4) + 4) % 4;
-    if (idx === this.activeServeSlot) return;
-    this.activeServeSlot = idx;
-    const preset = this.serveCameras[idx];
-    this.baseCamPos.set(...preset.position);
-    this.baseCamTarget.set(...preset.target);
+  private getZoomedPressboxPosition(): THREE.Vector3 {
+    const tgt = new THREE.Vector3(...this.viewSettings.pressbox.target);
+    const pos = new THREE.Vector3(...this.viewSettings.pressbox.position);
+    const offset = pos.sub(tgt).multiplyScalar(1 / Math.max(0.45, this.viewSettings.pressboxZoom));
+    return tgt.add(offset);
   }
 
-  public setCalibrateServeSlot(slotIndex: number): void {
-    // Save current slot before switching
-    if (this.calibrateMode && this.calibrateTab === 'camera') {
-      this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
-    }
-    this.calibrateServeSlot = ((slotIndex % 4) + 4) % 4;
-    const preset = this.serveCameras[this.calibrateServeSlot];
-    this.camera.position.set(...preset.position);
-    this.orbitControls.target.set(...preset.target);
+  private syncPressboxOrbitFromSettings(): void {
+    const pos = this.getZoomedPressboxPosition();
+    this.camera.position.copy(pos);
+    this.orbitControls.target.set(...this.viewSettings.pressbox.target);
     this.camera.lookAt(this.orbitControls.target);
     this.orbitControls.update();
+  }
+
+  public setViewSettings(next: CameraViewSettings): void {
+    this.viewSettings = {
+      pressbox: {
+        position: [...next.pressbox.position],
+        target: [...next.pressbox.target],
+      },
+      pressboxZoom: next.pressboxZoom,
+      followBehindDist: next.followBehindDist,
+      followBehindHeight: next.followBehindHeight,
+      fpEyeHeight: next.fpEyeHeight,
+      fpFov: next.fpFov,
+    };
+    this.baseCamPos.set(...this.viewSettings.pressbox.position);
+    this.baseCamTarget.set(...this.viewSettings.pressbox.target);
+    if (this.cameraViewMode === 'first_person') {
+      this.setFov(this.viewSettings.fpFov);
+    }
+    if (this.calibrateMode && this.calibrateTab === 'camera' && this.cameraViewMode === 'pressbox') {
+      this.syncPressboxOrbitFromSettings();
+    }
+  }
+
+  public getViewSettings(): CameraViewSettings {
+    return {
+      pressbox: {
+        position: [...this.viewSettings.pressbox.position],
+        target: [...this.viewSettings.pressbox.target],
+      },
+      pressboxZoom: this.viewSettings.pressboxZoom,
+      followBehindDist: this.viewSettings.followBehindDist,
+      followBehindHeight: this.viewSettings.followBehindHeight,
+      fpEyeHeight: this.viewSettings.fpEyeHeight,
+      fpFov: this.viewSettings.fpFov,
+    };
+  }
+
+  public setActiveServeCamera(_slotIndex: number): void {
+    // Press-box / Follow / 1st-Person views are now unified across all players
   }
 
   public setCameraPresetChangedCallback(cb: () => void): void {
     this.onCameraPresetChanged = cb;
   }
 
-  private captureCurrentCameraIntoSlot(slotIndex: number): void {
+  private captureCurrentPressboxFromOrbit(): void {
     const round = (n: number) => Math.round(n * 1000) / 1000;
-    const p = this.camera.position;
     const t = this.orbitControls.target;
-    this.serveCameras[slotIndex] = {
-      position: [round(p.x), round(p.y), round(p.z)],
+    const zoom = Math.max(0.45, this.viewSettings.pressboxZoom);
+    // Recover unzoomed base pressbox position so zoom slider & drag stay decoupled
+    const baseOffset = this.camera.position.clone().sub(t).multiplyScalar(zoom);
+    const basePos = t.clone().add(baseOffset);
+    this.viewSettings.pressbox = {
+      position: [round(basePos.x), round(basePos.y), round(basePos.z)],
       target: [round(t.x), round(t.y), round(t.z)],
     };
-    if (slotIndex === this.activeServeSlot) {
-      this.baseCamPos.copy(p);
-      this.baseCamTarget.copy(t);
-    }
+    this.baseCamPos.copy(basePos);
+    this.baseCamTarget.copy(t);
   }
 
   private onOrbitEnd = (): void => {
-    if (!this.calibrateMode || this.calibrateTab !== 'camera') return;
-    this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
+    if (!this.calibrateMode || this.calibrateTab !== 'camera' || this.cameraViewMode !== 'pressbox') {
+      return;
+    }
+    this.captureCurrentPressboxFromOrbit();
     this.onCameraPresetChanged?.();
   };
 
   public getSavedConfig(physicsSpeed: number, playerSpeed: number): SavedCourtConfig {
-    if (this.calibrateMode && this.calibrateTab === 'camera') {
-      this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
+    if (this.calibrateMode && this.calibrateTab === 'camera' && this.cameraViewMode === 'pressbox') {
+      this.captureCurrentPressboxFromOrbit();
     }
     const round = (n: number) => Math.round(n * 1000) / 1000;
     return {
@@ -1325,23 +1418,42 @@ export class SceneManager {
         position: c.position.map(round) as [number, number, number],
         target: c.target.map(round) as [number, number, number],
       })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset],
+      cameraViewMode: this.cameraViewMode,
+      cameraViewSettings: {
+        pressbox: {
+          position: this.viewSettings.pressbox.position.map(round) as [number, number, number],
+          target: this.viewSettings.pressbox.target.map(round) as [number, number, number],
+        },
+        pressboxZoom: round(this.viewSettings.pressboxZoom),
+        followBehindDist: round(this.viewSettings.followBehindDist),
+        followBehindHeight: round(this.viewSettings.followBehindHeight),
+        fpEyeHeight: round(this.viewSettings.fpEyeHeight),
+        fpFov: round(this.viewSettings.fpFov),
+      },
       physicsSpeed: round(physicsSpeed),
       playerSpeed: round(playerSpeed),
       introCameraStyle: this.introStyle,
     };
   }
 
-  public setCameraViewMode(mode: 'pressbox' | 'first_person'): void {
+  public setCameraViewMode(mode: CameraViewMode): void {
     this.cameraViewMode = mode;
     this.fpInit = false;
     this.skipIntroSpin();
+    const targetFov = mode === 'first_person' ? this.viewSettings.fpFov : this.mapConfig.fov;
+    this.setFov(targetFov);
+    this.orbitControls.enabled =
+      this.calibrateMode && this.calibrateTab === 'camera' && mode === 'pressbox';
+    if (this.calibrateMode && this.calibrateTab === 'camera' && mode === 'pressbox') {
+      this.syncPressboxOrbitFromSettings();
+    }
   }
 
   public resetFirstPersonCamera(): void {
     this.fpInit = false;
   }
 
-  public getCameraViewMode(): 'pressbox' | 'first_person' {
+  public getCameraViewMode(): CameraViewMode {
     return this.cameraViewMode;
   }
 
@@ -1351,28 +1463,38 @@ export class SceneManager {
     this.skipIntroSpin();
     this.netPointers.clear();
     this.netPrevPinchDist = 0;
-    this.orbitControls.enabled = enabled && this.calibrateTab === 'camera';
+    this.orbitControls.enabled =
+      enabled && this.calibrateTab === 'camera' && this.cameraViewMode === 'pressbox';
     if (enabled) {
-      const preset = this.serveCameras[this.calibrateServeSlot];
-      this.camera.position.set(...preset.position);
-      this.orbitControls.target.set(...preset.target);
-      this.orbitControls.update();
+      if (this.calibrateTab === 'camera' && this.cameraViewMode === 'pressbox') {
+        this.syncPressboxOrbitFromSettings();
+      } else if (this.calibrateTab === 'net') {
+        this.syncPressboxOrbitFromSettings();
+      }
     } else {
-      this.captureCurrentCameraIntoSlot(this.calibrateServeSlot);
-      const activePreset = this.serveCameras[this.activeServeSlot];
-      this.baseCamPos.set(...activePreset.position);
-      this.baseCamTarget.set(...activePreset.target);
-      this.currentCamPos.copy(this.baseCamPos);
+      if (this.calibrateTab === 'camera' && this.cameraViewMode === 'pressbox') {
+        this.captureCurrentPressboxFromOrbit();
+      }
+      this.baseCamPos.set(...this.viewSettings.pressbox.position);
+      this.baseCamTarget.set(...this.viewSettings.pressbox.target);
+      this.currentCamPos.copy(this.getZoomedPressboxPosition());
       this.currentCamTarget.copy(this.baseCamTarget);
       this.currentZoomFactor = 1.0;
     }
   }
 
   public setCalibrateTab(tab: 'camera' | 'net'): void {
+    if (this.calibrateMode && this.calibrateTab === 'camera' && this.cameraViewMode === 'pressbox') {
+      this.captureCurrentPressboxFromOrbit();
+    }
     this.calibrateTab = tab;
     this.netPointers.clear();
     this.netPrevPinchDist = 0;
-    this.orbitControls.enabled = this.calibrateMode && tab === 'camera';
+    this.orbitControls.enabled =
+      this.calibrateMode && tab === 'camera' && this.cameraViewMode === 'pressbox';
+    if (this.calibrateMode && tab === 'camera' && this.cameraViewMode === 'pressbox') {
+      this.syncPressboxOrbitFromSettings();
+    }
   }
 
   public setCourtOffsetSyncCallback(cb: (offset: CourtOffsetConfig) => void): void {
@@ -1511,8 +1633,11 @@ export class SceneManager {
     dt: number
   ): void {
     if (this.calibrateMode) {
-      this.orbitControls.update();
-      return;
+      if (this.calibrateTab === 'net' || this.cameraViewMode === 'pressbox') {
+        this.orbitControls.update();
+        return;
+      }
+      // In Follow-Behind or 1st-Person calibration, fall through so sliders preview live!
     }
 
     // Starting game cinematic camera intro animation
@@ -1575,8 +1700,84 @@ export class SceneManager {
       return;
     }
 
+    if (this.cameraViewMode === 'follow_behind') {
+      const awayFromNet = new THREE.Vector3(humanPos.x, 0, humanPos.z);
+      if (awayFromNet.lengthSq() > 0.01) {
+        awayFromNet.normalize();
+      } else {
+        awayFromNet.set(0, 0, 1);
+      }
+
+      const desiredEye = new THREE.Vector3(
+        humanPos.x + awayFromNet.x * this.viewSettings.followBehindDist,
+        this.viewSettings.followBehindHeight,
+        humanPos.z + awayFromNet.z * this.viewSettings.followBehindDist
+      );
+      const lookFocus = new THREE.Vector3(0, 0.78, 0).lerp(ballPos, 0.36);
+      const aimVec = lookFocus.sub(desiredEye);
+      const horizDist = Math.max(0.4, Math.hypot(aimVec.x, aimVec.z));
+      const desiredYaw = Math.atan2(aimVec.x, aimVec.z);
+      const desiredPitch = THREE.MathUtils.clamp(Math.atan2(aimVec.y, horizDist), -1.05, 0.65);
+
+      if (!this.fpInit) {
+        this.fpEyePos.copy(desiredEye);
+        this.fpEyeVelX.v = 0;
+        this.fpEyeVelY.v = 0;
+        this.fpEyeVelZ.v = 0;
+        this.fpYaw = desiredYaw;
+        this.fpYawVel.v = 0;
+        this.fpPitch = desiredPitch;
+        this.fpPitchVel.v = 0;
+        this.fpInit = true;
+      } else {
+        const clampedDt = Math.min(dt, 0.05);
+        this.fpEyePos.x = smoothDampScalar(
+          this.fpEyePos.x,
+          desiredEye.x,
+          this.fpEyeVelX,
+          0.16,
+          clampedDt
+        );
+        this.fpEyePos.y = smoothDampScalar(
+          this.fpEyePos.y,
+          desiredEye.y,
+          this.fpEyeVelY,
+          0.16,
+          clampedDt
+        );
+        this.fpEyePos.z = smoothDampScalar(
+          this.fpEyePos.z,
+          desiredEye.z,
+          this.fpEyeVelZ,
+          0.16,
+          clampedDt
+        );
+        this.fpYaw = smoothDampAngle(this.fpYaw, desiredYaw, this.fpYawVel, 0.16, clampedDt);
+        this.fpPitch = smoothDampScalar(
+          this.fpPitch,
+          desiredPitch,
+          this.fpPitchVel,
+          0.18,
+          clampedDt
+        );
+      }
+
+      const cosP = Math.cos(this.fpPitch);
+      const lookDir = new THREE.Vector3(
+        Math.sin(this.fpYaw) * cosP,
+        Math.sin(this.fpPitch),
+        Math.cos(this.fpYaw) * cosP
+      );
+      this.currentCamPos.copy(this.fpEyePos);
+      this.currentCamTarget.copy(this.fpEyePos).add(lookDir);
+      this.camera.position.copy(this.currentCamPos);
+      this.camera.lookAt(this.currentCamTarget);
+      return;
+    }
+
     if (this.cameraViewMode === 'first_person') {
-      const lookVec = ballPos.clone().sub(new THREE.Vector3(humanPos.x, 1.66, humanPos.z));
+      const eyeH = this.viewSettings.fpEyeHeight;
+      const lookVec = ballPos.clone().sub(new THREE.Vector3(humanPos.x, eyeH, humanPos.z));
       const horizLook = new THREE.Vector3(lookVec.x, 0, lookVec.z);
       if (horizLook.lengthSq() < 0.04) {
         // Fallback toward net if ball is directly overhead/at eye center
@@ -1588,7 +1789,7 @@ export class SceneManager {
         horizLook.set(0, 0, -1);
       }
 
-      const desiredEye = new THREE.Vector3(humanPos.x, 1.66, humanPos.z).addScaledVector(
+      const desiredEye = new THREE.Vector3(humanPos.x, eyeH, humanPos.z).addScaledVector(
         horizLook,
         0.16
       );
@@ -1687,7 +1888,7 @@ export class SceneManager {
     const baseOffset = this.baseCamPos
       .clone()
       .sub(this.baseCamTarget)
-      .multiplyScalar(this.currentZoomFactor);
+      .multiplyScalar(this.currentZoomFactor / Math.max(0.45, this.viewSettings.pressboxZoom));
     const yawAngle = THREE.MathUtils.clamp(ballPos.x * 0.032, -0.22, 0.22);
     baseOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { IntroCameraStyle } from '../config/maps';
+import { CameraViewMode, IntroCameraStyle } from '../config/maps';
 import { RULES_QUICK_REFERENCE } from '../config/rules';
 
 interface MenuDrawerProps {
@@ -8,8 +8,8 @@ interface MenuDrawerProps {
   onResetRally: () => void;
   onResetMatch: (pointsToWin: 15 | 21) => void;
   pointsToWin: 15 | 21;
-  cameraViewMode: 'pressbox' | 'first_person';
-  onChangeCameraViewMode: (mode: 'pressbox' | 'first_person') => void;
+  cameraViewMode: CameraViewMode;
+  onChangeCameraViewMode: (mode: CameraViewMode) => void;
   introStyle: IntroCameraStyle;
   onChangeIntroStyle: (style: IntroCameraStyle) => void;
   calibrateMode: boolean;
@@ -121,7 +121,16 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
                 onClose();
               }}
             >
-              Press-Box View
+              Press Box
+            </button>
+            <button
+              className={`action-btn ${cameraViewMode === 'follow_behind' ? 'active' : ''}`}
+              onClick={() => {
+                onChangeCameraViewMode('follow_behind');
+                onClose();
+              }}
+            >
+              Follow Behind
             </button>
             <button
               className={`action-btn ${cameraViewMode === 'first_person' ? 'active' : ''}`}
@@ -130,7 +139,7 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
                 onClose();
               }}
             >
-              1st Person View
+              1st Person
             </button>
           </div>
 

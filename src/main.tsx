@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { BotController } from './ai/BotController';
 import { PHASE1_LINEUP, TEAM_COLORS, TeamId } from './config/characters';
 import {
+  CameraViewMode,
+  CameraViewSettings,
   CourtOffsetConfig,
   DEFAULT_MAP_ID,
   fetchRemoteCourtConfig,
@@ -70,8 +72,12 @@ const App: React.FC = () => {
     () => new URLSearchParams(window.location.search).get('calibrate') === '1'
   );
   const [calibrateTab, setCalibrateTab] = useState<CalibratorTab>('camera');
-  const [calibrateServeSlot, setCalibrateServeSlot] = useState<number>(0);
-  const [cameraViewMode, setCameraViewMode] = useState<'pressbox' | 'first_person'>('first_person');
+  const [cameraViewMode, setCameraViewMode] = useState<CameraViewMode>(
+    initialSaved.current.cameraViewMode
+  );
+  const [viewSettings, setViewSettings] = useState<CameraViewSettings>(
+    initialSaved.current.cameraViewSettings
+  );
   const [introStyle, setIntroStyle] = useState<IntroCameraStyle>(
     initialSaved.current.introCameraStyle
   );
@@ -158,11 +164,17 @@ const App: React.FC = () => {
         if (disposed || !remote) return;
         sceneMgr.applySavedConfig(remote);
         setCourtOffset(remote.courtOffset);
+        setCameraViewMode(remote.cameraViewMode);
+        setViewSettings(remote.cameraViewSettings);
         setPhysicsSpeed(remote.physicsSpeed);
         setPlayerSpeed(remote.playerSpeed);
         setIntroStyle(remote.introCameraStyle);
         physicsSpeedRef.current = remote.physicsSpeed;
         playerSpeedRef.current = remote.playerSpeed;
+        human.root.visible = remote.cameraViewMode !== 'first_person';
+        if (inputMgr) {
+          inputMgr.fullScreenSwipe = remote.cameraViewMode === 'first_person';
+        }
       });
 
       await physics.init({
@@ -295,10 +307,6 @@ const App: React.FC = () => {
 
         const speedMult = physicsSpeedRef.current;
         const simDt = rawDt * speedMult;
-
-        // Switch press-box camera preset automatically when the server slot rotates
-        const activeServerSlot = matchMgr.getCurrentServer().config.slotIndex;
-        sceneMgr.setActiveServeCamera(activeServerSlot);
 
         // Human movement (Joystick or Return-to-Net auto-sprint)
         let { dir, deflection } = inputMgr.getMoveIntent();
@@ -495,9 +503,20 @@ const App: React.FC = () => {
     engineRef.current?.sceneMgr.setCalibrateTab(tab);
   };
 
-  const handleChangeCalibrateServeSlot = (slot: number) => {
-    setCalibrateServeSlot(slot);
-    engineRef.current?.sceneMgr.setCalibrateServeSlot(slot);
+  const handleChangeCameraViewMode = (mode: CameraViewMode) => {
+    setCameraViewMode(mode);
+    const inst = engineRef.current;
+    if (inst) {
+      inst.sceneMgr.setCameraViewMode(mode);
+      inst.human.root.visible = mode !== 'first_person';
+      inst.inputMgr.fullScreenSwipe = mode === 'first_person';
+      scheduleAutoSave();
+    }
+  };
+
+  const handleChangeViewSettings = (next: CameraViewSettings) => {
+    setViewSettings(next);
+    engineRef.current?.sceneMgr.setViewSettings(next);
     scheduleAutoSave();
   };
 
@@ -534,20 +553,12 @@ const App: React.FC = () => {
           }}
           calibrateMode={calibrateMode}
           calibrateTab={calibrateTab}
-          calibrateServeSlot={calibrateServeSlot}
           onChangeCalibrateTab={handleChangeCalibrateTab}
-          onChangeCalibrateServeSlot={handleChangeCalibrateServeSlot}
           onToggleCalibrate={handleToggleCalibrate}
           cameraViewMode={cameraViewMode}
-          onChangeCameraViewMode={(mode) => {
-            setCameraViewMode(mode);
-            const inst = engineRef.current;
-            if (inst) {
-              inst.sceneMgr.setCameraViewMode(mode);
-              inst.human.root.visible = mode !== 'first_person';
-              inst.inputMgr.fullScreenSwipe = mode === 'first_person';
-            }
-          }}
+          onChangeCameraViewMode={handleChangeCameraViewMode}
+          viewSettings={viewSettings}
+          onChangeViewSettings={handleChangeViewSettings}
           introStyle={introStyle}
           onChangeIntroStyle={(style) => {
             setIntroStyle(style);

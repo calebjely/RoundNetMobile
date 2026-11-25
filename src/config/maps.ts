@@ -11,10 +11,29 @@ export interface CameraPreset {
 
 export type IntroCameraStyle = 'swoop90' | 'wide_zoom_tilt' | 'glide180' | 'low_flyover';
 
+export type CameraViewMode = 'pressbox' | 'follow_behind' | 'first_person';
+
+export interface CameraViewSettings {
+  pressbox: CameraPreset;
+  /** Press-Box zoom multiplier (0.50 = wide, 1.00 = default, 2.00 = zoomed in) */
+  pressboxZoom: number;
+  /** Follow-Behind distance behind player in meters (1.5 – 5.5) */
+  followBehindDist: number;
+  /** Follow-Behind camera height in meters (1.3 – 3.8) */
+  followBehindHeight: number;
+  /** First-Person eye height in meters (1.45 – 1.90) */
+  fpEyeHeight: number;
+  /** First-Person field of view in degrees (52 – 90) */
+  fpFov: number;
+}
+
 export interface SavedCourtConfig {
   courtOffset: CourtOffsetConfig;
-  /** 4 serving camera presets indexed by player slot (0=South, 1=West, 2=North, 3=East) */
+  /** Legacy 4 serving camera presets retained for backward compatibility */
   serveCameras: [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
+  /** Unified camera view settings applied to all players */
+  cameraViewMode: CameraViewMode;
+  cameraViewSettings: CameraViewSettings;
   /** Physics time scale multiplier (0.6 – 2.0, default 1.25) */
   physicsSpeed: number;
   /** Player movement speed multiplier (0.5 – 1.5, default 0.82) */
@@ -95,6 +114,18 @@ export function getDefaultSavedConfig(map: MapConfig): SavedCourtConfig {
       position: [...c.position] as [number, number, number],
       target: [...c.target] as [number, number, number],
     })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset],
+    cameraViewMode: 'first_person',
+    cameraViewSettings: {
+      pressbox: {
+        position: [...map.cameraPosition],
+        target: [...map.cameraTarget],
+      },
+      pressboxZoom: 1.0,
+      followBehindDist: 2.8,
+      followBehindHeight: 2.15,
+      fpEyeHeight: 1.66,
+      fpFov: 62,
+    },
     physicsSpeed: map.defaultPhysicsSpeed,
     playerSpeed: map.defaultPlayerSpeed,
     introCameraStyle: 'swoop90',
@@ -153,6 +184,15 @@ function mergeSavedConfig(
   fallback: SavedCourtConfig,
   parsed: Partial<SavedCourtConfig>
 ): SavedCourtConfig {
+  const clamp = (v: unknown, min: number, max: number, dflt: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : dflt;
+
+  const pView = parsed.cameraViewSettings;
+  const legacyPressbox =
+    Array.isArray(parsed.serveCameras) && parsed.serveCameras[0]?.position && parsed.serveCameras[0]?.target
+      ? parsed.serveCameras[0]
+      : undefined;
+
   return {
     courtOffset: parsed.courtOffset
       ? {
@@ -168,6 +208,45 @@ function mergeSavedConfig(
             target: c?.target ?? fallback.serveCameras[i].target,
           })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset])
         : fallback.serveCameras,
+    cameraViewMode:
+      parsed.cameraViewMode === 'pressbox' ||
+      parsed.cameraViewMode === 'follow_behind' ||
+      parsed.cameraViewMode === 'first_person'
+        ? parsed.cameraViewMode
+        : fallback.cameraViewMode,
+    cameraViewSettings: {
+      pressbox: pView?.pressbox?.position && pView?.pressbox?.target
+        ? {
+            position: pView.pressbox.position,
+            target: pView.pressbox.target,
+          }
+        : legacyPressbox ?? fallback.cameraViewSettings.pressbox,
+      pressboxZoom: clamp(
+        pView?.pressboxZoom,
+        0.5,
+        2.0,
+        fallback.cameraViewSettings.pressboxZoom
+      ),
+      followBehindDist: clamp(
+        pView?.followBehindDist,
+        1.5,
+        5.5,
+        fallback.cameraViewSettings.followBehindDist
+      ),
+      followBehindHeight: clamp(
+        pView?.followBehindHeight,
+        1.3,
+        3.8,
+        fallback.cameraViewSettings.followBehindHeight
+      ),
+      fpEyeHeight: clamp(
+        pView?.fpEyeHeight,
+        1.45,
+        1.9,
+        fallback.cameraViewSettings.fpEyeHeight
+      ),
+      fpFov: clamp(pView?.fpFov, 52, 90, fallback.cameraViewSettings.fpFov),
+    },
     physicsSpeed:
       typeof parsed.physicsSpeed === 'number' &&
       parsed.physicsSpeed >= 0.5 &&

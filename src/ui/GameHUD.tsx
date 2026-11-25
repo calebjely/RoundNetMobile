@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { CourtOffsetConfig, IntroCameraStyle } from '../config/maps';
+import {
+  CameraViewMode,
+  CameraViewSettings,
+  CourtOffsetConfig,
+  IntroCameraStyle,
+} from '../config/maps';
 import { JoystickVisualState, SwipeVisualState } from '../engine/InputManager';
 import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
 import { FirstPersonHints, OffscreenLandingHint } from '../engine/SceneManager';
@@ -23,12 +28,12 @@ interface GameHUDProps {
   onResetMatch: (pointsToWin: 15 | 21) => void;
   calibrateMode: boolean;
   calibrateTab: CalibratorTab;
-  calibrateServeSlot: number;
   onChangeCalibrateTab: (tab: CalibratorTab) => void;
-  onChangeCalibrateServeSlot: (slot: number) => void;
   onToggleCalibrate: () => void;
-  cameraViewMode: 'pressbox' | 'first_person';
-  onChangeCameraViewMode: (mode: 'pressbox' | 'first_person') => void;
+  cameraViewMode: CameraViewMode;
+  onChangeCameraViewMode: (mode: CameraViewMode) => void;
+  viewSettings: CameraViewSettings;
+  onChangeViewSettings: (next: CameraViewSettings) => void;
   introStyle: IntroCameraStyle;
   onChangeIntroStyle: (style: IntroCameraStyle) => void;
   courtOffset: CourtOffsetConfig;
@@ -58,12 +63,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onResetMatch,
   calibrateMode,
   calibrateTab,
-  calibrateServeSlot,
   onChangeCalibrateTab,
-  onChangeCalibrateServeSlot,
   onToggleCalibrate,
   cameraViewMode,
   onChangeCameraViewMode,
+  viewSettings,
+  onChangeViewSettings,
   introStyle,
   onChangeIntroStyle,
   courtOffset,
@@ -309,8 +314,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Bottom-Left Persistent 3D Arcade Cluster (Press-Box mode only) */}
-      {cameraViewMode === 'pressbox' && (
+      {/* Bottom-Left Persistent 3D Arcade Cluster (Press Box & Follow Behind modes) */}
+      {cameraViewMode !== 'first_person' && (
         <div className="bottom-left-cluster">
           <button
             data-ui-interactive="true"
@@ -360,8 +365,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         visible={calibrateMode}
         activeTab={calibrateTab}
         onChangeTab={onChangeCalibrateTab}
-        serveSlot={calibrateServeSlot}
-        onChangeServeSlot={onChangeCalibrateServeSlot}
+        cameraViewMode={cameraViewMode}
+        onChangeCameraViewMode={onChangeCameraViewMode}
+        viewSettings={viewSettings}
+        onChangeViewSettings={onChangeViewSettings}
         offset={courtOffset}
         physicsSpeed={physicsSpeed}
         playerSpeed={playerSpeed}

@@ -1,5 +1,9 @@
 import React from 'react';
-import { CourtOffsetConfig } from '../config/maps';
+import {
+  CameraViewMode,
+  CameraViewSettings,
+  CourtOffsetConfig,
+} from '../config/maps';
 
 export type CalibratorTab = 'camera' | 'net';
 
@@ -7,8 +11,10 @@ interface CalibratorPanelProps {
   visible: boolean;
   activeTab: CalibratorTab;
   onChangeTab: (tab: CalibratorTab) => void;
-  serveSlot: number;
-  onChangeServeSlot: (slot: number) => void;
+  cameraViewMode: CameraViewMode;
+  onChangeCameraViewMode: (mode: CameraViewMode) => void;
+  viewSettings: CameraViewSettings;
+  onChangeViewSettings: (next: CameraViewSettings) => void;
   offset: CourtOffsetConfig;
   physicsSpeed: number;
   playerSpeed: number;
@@ -20,19 +26,20 @@ interface CalibratorPanelProps {
   onExit: () => void;
 }
 
-const SERVE_SLOTS = [
-  { idx: 0, label: 'S1' },
-  { idx: 1, label: 'S2' },
-  { idx: 2, label: 'S3' },
-  { idx: 3, label: 'S4' },
+const VIEW_MODES: { id: CameraViewMode; label: string }[] = [
+  { id: 'pressbox', label: 'Press Box' },
+  { id: 'follow_behind', label: 'Follow' },
+  { id: 'first_person', label: '1st Person' },
 ];
 
 export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
   visible,
   activeTab,
   onChangeTab,
-  serveSlot,
-  onChangeServeSlot,
+  cameraViewMode,
+  onChangeCameraViewMode,
+  viewSettings,
+  onChangeViewSettings,
   offset,
   physicsSpeed,
   playerSpeed,
@@ -81,21 +88,134 @@ export const CalibratorPanel: React.FC<CalibratorPanelProps> = ({
       {activeTab === 'camera' ? (
         <>
           <div className="cal-hint">
-            Serve Angle (Drag: Orbit · Pinch: Zoom)
+            {cameraViewMode === 'pressbox'
+              ? 'Press Box (Drag: Angle · Slider: Zoom)'
+              : cameraViewMode === 'follow_behind'
+                ? 'Follow Behind (Applies to All Players)'
+                : '1st Person POV (Applies to All Players)'}
           </div>
           <div className="serve-slot-row">
-            {SERVE_SLOTS.map((s) => (
+            {VIEW_MODES.map((m) => (
               <button
-                key={s.idx}
-                className={`slot-btn ${serveSlot === s.idx ? 'active' : ''}`}
-                onClick={() => onChangeServeSlot(s.idx)}
+                key={m.id}
+                className={`slot-btn ${cameraViewMode === m.id ? 'active' : ''}`}
+                onClick={() => onChangeCameraViewMode(m.id)}
               >
-                {s.label}
+                {m.label}
               </button>
             ))}
           </div>
 
           <div className="v-slider-group">
+            {cameraViewMode === 'pressbox' && (
+              <div className="v-slider-col">
+                <span className="v-slider-val">{viewSettings.pressboxZoom.toFixed(2)}x</span>
+                <input
+                  className="v-slider"
+                  type="range"
+                  min={0.5}
+                  max={2.0}
+                  step={0.05}
+                  value={viewSettings.pressboxZoom}
+                  onChange={(e) =>
+                    onChangeViewSettings({
+                      ...viewSettings,
+                      pressboxZoom: parseFloat(e.target.value),
+                    })
+                  }
+                />
+                <span className="v-slider-lbl">Zoom</span>
+              </div>
+            )}
+
+            {cameraViewMode === 'follow_behind' && (
+              <>
+                <div className="v-slider-col">
+                  <span className="v-slider-val">
+                    {viewSettings.followBehindDist.toFixed(1)}m
+                  </span>
+                  <input
+                    className="v-slider"
+                    type="range"
+                    min={1.5}
+                    max={5.5}
+                    step={0.1}
+                    value={viewSettings.followBehindDist}
+                    onChange={(e) =>
+                      onChangeViewSettings({
+                        ...viewSettings,
+                        followBehindDist: parseFloat(e.target.value),
+                      })
+                    }
+                  />
+                  <span className="v-slider-lbl">Dist</span>
+                </div>
+
+                <div className="v-slider-col">
+                  <span className="v-slider-val">
+                    {viewSettings.followBehindHeight.toFixed(2)}m
+                  </span>
+                  <input
+                    className="v-slider"
+                    type="range"
+                    min={1.3}
+                    max={3.8}
+                    step={0.05}
+                    value={viewSettings.followBehindHeight}
+                    onChange={(e) =>
+                      onChangeViewSettings({
+                        ...viewSettings,
+                        followBehindHeight: parseFloat(e.target.value),
+                      })
+                    }
+                  />
+                  <span className="v-slider-lbl">Hgt</span>
+                </div>
+              </>
+            )}
+
+            {cameraViewMode === 'first_person' && (
+              <>
+                <div className="v-slider-col">
+                  <span className="v-slider-val">{viewSettings.fpEyeHeight.toFixed(2)}m</span>
+                  <input
+                    className="v-slider"
+                    type="range"
+                    min={1.45}
+                    max={1.9}
+                    step={0.02}
+                    value={viewSettings.fpEyeHeight}
+                    onChange={(e) =>
+                      onChangeViewSettings({
+                        ...viewSettings,
+                        fpEyeHeight: parseFloat(e.target.value),
+                      })
+                    }
+                  />
+                  <span className="v-slider-lbl">Eye</span>
+                </div>
+
+                <div className="v-slider-col">
+                  <span className="v-slider-val">{Math.round(viewSettings.fpFov)}°</span>
+                  <input
+                    className="v-slider"
+                    type="range"
+                    min={52}
+                    max={90}
+                    step={1}
+                    value={viewSettings.fpFov}
+                    onChange={(e) =>
+                      onChangeViewSettings({
+                        ...viewSettings,
+                        fpFov: parseFloat(e.target.value),
+                      })
+                    }
+                  />
+                  <span className="v-slider-lbl">FOV</span>
+                </div>
+              </>
+            )}
+
             <div className="v-slider-col">
               <span className="v-slider-val">{physicsSpeed.toFixed(2)}x</span>
               <input
