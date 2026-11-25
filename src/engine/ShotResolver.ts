@@ -144,6 +144,10 @@ export class ShotResolver {
     }
 
     const signedDt = tHoriz > 0.08 ? Math.max(tHoriz, dtVert) : dtVert;
+    const playerDistFromNet = Math.hypot(playerPos.x, playerPos.z);
+    const farOutPenalty = THREE.MathUtils.clamp((playerDistFromNet - 2.5) / 1.8, 0, 1);
+    const highBallPenalty = ballPos.y > 1.72 ? (ballPos.y - 1.72) * 0.9 : 0;
+
     const inRange =
       horizDist <= 2.95 &&
       ballPos.y >= 0.15 &&
@@ -155,11 +159,11 @@ export class ShotResolver {
       zone = horizDist <= 3.7 && ballPos.y <= MAX_HITTING_HEIGHT + 0.65 ? 'yellow' : 'red';
       timing = 'Early';
     } else if (
-      horizDist <= 2.65 &&
+      horizDist <= 2.65 - farOutPenalty * 0.45 &&
       ballPos.y >= 0.45 &&
-      ballPos.y <= 1.92 &&
-      signedDt >= -0.16 &&
-      signedDt <= 0.3
+      ballPos.y <= 1.82 &&
+      signedDt >= -0.16 + farOutPenalty * 0.06 &&
+      signedDt <= 0.3 - farOutPenalty * 0.12 - highBallPenalty * 0.12
     ) {
       zone = 'green';
       timing = 'Perfect';
@@ -171,7 +175,8 @@ export class ShotResolver {
       timing = 'Bad';
     }
 
-    // Continuous shrinking ring progress (1.0 far/early -> 0.5 sweet spot -> 0.0 late)
+    // Continuous shrinking/growing ring progress & quality
+    const rawQ = 1 - Math.abs(signedDt) / 0.38 - farOutPenalty * 0.22 - highBallPenalty * 0.35;
     const distEarly = THREE.MathUtils.clamp((horizDist - 1.15) / 3.35, 0, 1);
     const timeEarly = THREE.MathUtils.clamp(signedDt / 0.72, 0, 1);
     const earlyFactor = Math.max(distEarly, timeEarly);
@@ -183,7 +188,7 @@ export class ShotResolver {
 
     return {
       offset: THREE.MathUtils.clamp(-signedDt / 0.35, -1, 1),
-      quality01: THREE.MathUtils.clamp(1 - Math.abs(signedDt) / 0.38, 0.05, 1),
+      quality01: THREE.MathUtils.clamp(rawQ, 0.05, 1),
       zone,
       timing,
       ringProgress,
@@ -247,6 +252,9 @@ export class ShotResolver {
     const shortMod = player.config.profile.stats.shortGame;
 
     const distToNet = Math.hypot(ballPos.x, ballPos.z);
+    const playerDistToNet = Math.hypot(player.position.x, player.position.z);
+    const farOut01 = THREE.MathUtils.clamp((playerDistToNet - 2.35) / 1.85, 0, 1);
+    const highBall01 = THREE.MathUtils.clamp((ballPos.y - 1.65) / 0.5, 0, 1);
     const netPlaneY = OFFICIAL_NET.netHeight + OFFICIAL_BALL.radius;
 
     const rightHoriz = camRight.clone().setY(0);
@@ -257,9 +265,32 @@ export class ShotResolver {
     if (toNet.lengthSq() > 0.0001) toNet.normalize();
     else toNet.set(0, 0, -1);
 
-    // Bad/Red timing adds scatter; Yellow adds minor scatter
+    // Tap when close to the net -> forgiving soft Drop Shot (low bounce, very close to net)
+    if (swipe.isTap && playerDistToNet <= 2.45) {
+      const dropSpread = (zone === 'green' ? 0.04 : 0.09) + highBall01 * 0.22;
+      const dropTarget = new THREE.Vector3(
+        (Math.random() - 0.5) * dropSpread,
+        netPlaneY + 0.02 + highBall01 * 0.12,
+        (Math.random() - 0.5) * dropSpread
+      );
+      // Gentle flight -> soft downward speed -> low bounce tight to the net!
+      const dropFlight = THREE.MathUtils.clamp(0.46 + distToNet * 0.09, 0.48, 0.72);
+      return {
+        velocity: computeBallisticVelocity(ballPos, dropTarget, dropFlight),
+        timing,
+        zone,
+        shotType: 'LOW',
+        anim: 'hit_low',
+        isAttackAtNet: true,
+        triggeredDive: false,
+      };
+    }
+
+    // Bad/Red timing, deep outfield running, or very high balls add scatter
     const scatterMag =
-      zone === 'green' ? 0.025 : zone === 'yellow' ? 0.09 / shortMod : 0.34 / shortMod;
+      (zone === 'green' ? 0.025 : zone === 'yellow' ? 0.09 / shortMod : 0.34 / shortMod) +
+      farOut01 * 0.24 +
+      highBall01 * 0.28;
     const randScatterX = (Math.random() - 0.5) * 2 * scatterMag;
     const randScatterZ = (Math.random() - 0.5) * 2 * scatterMag;
 
@@ -272,7 +303,34 @@ export class ShotResolver {
         const partnerDist = Math.hypot(partnerPos.x, partnerPos.z);
         const dirX = partnerDist > 0.05 ? partnerPos.x / partnerDist : 0;
         const dirZ = partnerDist > 0.05 ? partnerPos.z / partnerDist : 1;
-        // Always place set between partner and rim (1.38 m .. 2.05 m from net) so partner runs forward!
+
+        // If way out in the field and NOT green, set becomes wild (pops straight up or drifts wide/out)
+        if (farOut01 > 0.28 && zone !== 'green') {
+          const mode = Math.random();
+          const wildTarget =
+            mode < 0.45
+              ? new THREE.Vector3(
+                  ballPos.x + (Math.random() - 0.5) * 0.9,
+                  1.35,
+                  ballPos.z + (Math.random() - 0.5) * 0.9
+                ) // straight up pop
+              : new THREE.Vector3(
+                  dirX * (partnerDist + 1.1) + randScatterX * 1.4,
+                  1.1,
+                  dirZ * (partnerDist + 1.1) + randScatterZ * 1.4
+                ); // drifts further out
+          return {
+            velocity: computeBallisticVelocity(ballPos, wildTarget, 1.38),
+            timing,
+            zone,
+            shotType,
+            anim: 'hit_high',
+            isAttackAtNet: false,
+            triggeredDive: shouldAutoDive,
+          };
+        }
+
+        // Always place clean set between partner and rim (1.38 m .. 2.05 m from net) so partner runs forward!
         const setRadius = THREE.MathUtils.clamp(
           partnerDist * 0.58,
           1.38,
@@ -330,8 +388,8 @@ export class ShotResolver {
         netPlaneY + 0.03 - lateDropPenalty,
         rightHoriz.z * lateralOffset + toNet.z * depthAim + randScatterZ * 0.65
       );
-      // Clamp horizontal hit point safely inside the rim unless it's a red shank
-      const maxHitR = zone === 'red' ? 0.34 : 0.23;
+      // Clamp horizontal hit point safely inside the rim when close & green/yellow; far-out or red hits are less accurate
+      const maxHitR = zone === 'red' || farOut01 > 0.5 ? 0.35 : 0.23;
       const hitR = Math.hypot(target.x, target.z);
       if (hitR > maxHitR) {
         target.x = (target.x / hitR) * maxHitR;

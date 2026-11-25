@@ -321,8 +321,9 @@ export class MatchManager {
       this.teamTouches = nextTouches;
       this.lastTouchPlayerIdx = human.config.slotIndex;
 
-      const shotName =
-        outcome.shotType === 'SPIKE'
+      const shotName = swipe.isTap
+        ? 'Drop Shot'
+        : outcome.shotType === 'SPIKE'
           ? 'Spike'
           : outcome.shotType === 'HIGH'
             ? nextTouches <= 2

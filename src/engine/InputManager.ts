@@ -7,6 +7,7 @@ export interface SwipeEvent {
   speedPxPerSec: number;
   startX: number;
   startY: number;
+  isTap?: boolean;
 }
 
 export interface JoystickVisualState {
@@ -279,12 +280,26 @@ export class InputManager {
         this.callbacks.onBlockEnd();
       } else if (!this.swipeFired) {
         const target = this.getSwipeTarget?.() ?? null;
-        const canFireOnRelease =
-          !target || target.allowAnywhere || (this.startedOnBall && target.inRange);
-        if (canFireOnRelease) {
-          const now = performance.now();
-          this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });
-          this.emitBufferedSwipe(now, e.clientX, e.clientY);
+        const distFromStart = Math.hypot(e.clientX - this.rightStartX, e.clientY - this.rightStartY);
+        if (this.startedOnBall && target?.inRange && distFromStart < 24) {
+          this.swipeFired = true;
+          this.callbacks.onSwipe({
+            dx: 0,
+            dy: 0,
+            distancePx: 0,
+            speedPxPerSec: 180,
+            startX: this.rightStartX,
+            startY: this.rightStartY,
+            isTap: true,
+          });
+        } else {
+          const canFireOnRelease =
+            !target || target.allowAnywhere || (this.startedOnBall && target.inRange);
+          if (canFireOnRelease) {
+            const now = performance.now();
+            this.swipeSamples.push({ x: e.clientX, y: e.clientY, t: now });
+            this.emitBufferedSwipe(now, e.clientX, e.clientY);
+          }
         }
       }
       this.startedOnBall = false;

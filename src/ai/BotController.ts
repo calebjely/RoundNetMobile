@@ -160,7 +160,8 @@ export class BotController {
                 ballPos.z - bot.position.z
               );
               const reach = bot.getEffectiveReach() * 0.58;
-              const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= MAX_HITTING_HEIGHT;
+              const maxBotHeight = ballPos.y > 1.72 ? 1.82 : MAX_HITTING_HEIGHT;
+              const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= maxBotHeight;
 
               if (
                 cd <= 0 &&
@@ -289,11 +290,14 @@ export class BotController {
         bot.position.z *= pushOut;
       }
 
-      // Mix hard spikes (75%) and high rainbow drop shots (25%)
+      // Mix hard spikes (75%) and high rainbow drop shots (25%); deep or high-ball shots are less accurate
       const isDropShot = Math.random() < 0.25;
-      const cutX = (Math.random() - 0.5) * 0.32;
-      const cutZ = (Math.random() - 0.5) * 0.32;
-      const target = new THREE.Vector3(cutX, netPlaneY - 0.01, cutZ);
+      const farSpread = Math.max(0, distNet - 2.3) * 0.16;
+      const highSpread = Math.max(0, ballPos.y - 1.65) * 0.28;
+      const totalSpread = 0.32 + farSpread + highSpread;
+      const cutX = (Math.random() - 0.5) * totalSpread;
+      const cutZ = (Math.random() - 0.5) * totalSpread;
+      const target = new THREE.Vector3(cutX, netPlaneY - 0.01 + highSpread * 0.25, cutZ);
 
       const flightTime = isDropShot
         ? THREE.MathUtils.clamp(0.88 + distNet * 0.1, 0.88, 1.25)
