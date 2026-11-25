@@ -175,9 +175,7 @@ export class MatchManager {
 
   public handleHumanSwipe(
     swipe: SwipeEvent,
-    camRight = new THREE.Vector3(1, 0, 0),
-    barValue = 0.5,
-    screenCenterDist = 0
+    camRight = new THREE.Vector3(1, 0, 0)
   ): void {
     const human = this.players.find((p) => p.isHuman);
     if (!human) return;
@@ -260,9 +258,7 @@ export class MatchManager {
         swipe,
         nextTouches,
         isServeReceive || this.isFirstPossessionAfterServe,
-        camRight,
-        barValue,
-        screenCenterDist
+        camRight
       );
       if (!outcome) return;
 
@@ -304,11 +300,7 @@ export class MatchManager {
       this.possessionTeam = human.team;
       this.teamTouches = nextTouches;
       this.lastTouchPlayerIdx = human.config.slotIndex;
-      this.spawnPopup(
-        ballPos,
-        outcome.timing === 'Bad' ? 'BAD HIT!' : outcome.timing,
-        outcome.timing === 'Bad' ? 'Fault' : outcome.timing
-      );
+      this.spawnPopup(ballPos, outcome.timing, outcome.timing);
     }
   }
 

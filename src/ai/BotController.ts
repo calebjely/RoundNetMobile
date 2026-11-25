@@ -32,9 +32,9 @@ export class BotController {
       this.match.possessionTeam !== this.prevPossessionTeam ||
       this.match.teamTouches !== this.prevTeamTouches
     ) {
-      // Realistic human-like 0.26s reaction window when possession flips off the net
+      // Realistic human-like 0.15s reaction window when possession flips off the net
       if (this.match.teamTouches === 0 && this.match.phase === 'RALLY_LIVE') {
-        this.reactionDelay = 0.26;
+        this.reactionDelay = 0.16;
       }
       this.prevPossessionTeam = this.match.possessionTeam;
       this.prevTeamTouches = this.match.teamTouches;
@@ -139,9 +139,7 @@ export class BotController {
 
               if (distToIntercept > 0.25) {
                 moveIntent.set(dx / distToIntercept, dz / distToIntercept);
-                deflection = movementOnly
-                  ? (distToIntercept > 1.3 ? 0.86 : 0.5)
-                  : (distToIntercept > 1.5 ? 0.68 : 0.44);
+                deflection = distToIntercept > 1.3 ? 0.86 : 0.5;
               }
             }
 
@@ -151,7 +149,7 @@ export class BotController {
                 ballPos.x - bot.position.x,
                 ballPos.z - bot.position.z
               );
-              const reach = bot.getEffectiveReach() * 0.58;
+              const reach = bot.getEffectiveReach() * 0.72;
               const ballPlayable = ballPos.y >= 0.22 && ballPos.y <= MAX_HITTING_HEIGHT;
 
               if (
@@ -191,8 +189,7 @@ export class BotController {
 
       const isPreServe =
         phase === 'SERVE_WAIT_TOSS' || phase === 'SERVE_METER_ACTIVE';
-      const effectiveSpeed = movementOnly ? playerSpeedMult : playerSpeedMult * 0.82;
-      bot.update(dt, moveIntent, deflection, isPreServe, effectiveSpeed);
+      bot.update(dt, moveIntent, deflection, isPreServe, playerSpeedMult);
   }
 
   private moveToStartSpot(

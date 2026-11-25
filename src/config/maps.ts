@@ -76,7 +76,7 @@ export const MAPS: Record<string, MapConfig> = {
     fov: 46,
     maxZoomOutFactor: 2.25,
     defaultPhysicsSpeed: 1.25,
-    defaultPlayerSpeed: 0.74,
+    defaultPlayerSpeed: 0.82,
   },
 };
 

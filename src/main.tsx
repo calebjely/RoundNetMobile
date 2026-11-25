@@ -191,14 +191,7 @@ const App: React.FC = () => {
           const camRight = new THREE.Vector3()
             .crossVectors(camFwd, new THREE.Vector3(0, 1, 0))
             .normalize();
-
-          const bPos = physics.getBallPosition();
-          const dBall = Math.hypot(bPos.x - human.position.x, bPos.z - human.position.z);
-          const barVal = THREE.MathUtils.clamp(1.0 - dBall / 3.4, 0.04, 0.96);
-          const bProj = bPos.clone().project(sceneMgr.camera);
-          const centerDist = Math.hypot(bProj.x, bProj.y);
-
-          matchMgr.handleHumanSwipe(swipe, camRight, barVal, centerDist);
+          matchMgr.handleHumanSwipe(swipe, camRight);
         },
         onBlockStart: () => {
           sceneMgr.skipIntroSpin();
