@@ -9,12 +9,16 @@ export interface CameraPreset {
   target: [number, number, number];
 }
 
+export type IntroCameraStyle = 'swoop90' | 'wide_zoom_tilt' | 'glide180' | 'low_flyover';
+
 export interface SavedCourtConfig {
   courtOffset: CourtOffsetConfig;
   /** 4 serving camera presets indexed by player slot (0=South, 1=West, 2=North, 3=East) */
   serveCameras: [CameraPreset, CameraPreset, CameraPreset, CameraPreset];
   /** Physics time scale multiplier (0.6 – 2.0, default 1.25) */
   physicsSpeed: number;
+  /** Start screen / match-reset camera intro movement */
+  introCameraStyle: IntroCameraStyle;
 }
 
 export interface MapConfig {
@@ -88,6 +92,7 @@ export function getDefaultSavedConfig(map: MapConfig): SavedCourtConfig {
       target: [...c.target] as [number, number, number],
     })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset],
     physicsSpeed: map.defaultPhysicsSpeed,
+    introCameraStyle: 'swoop90',
   };
 }
 
@@ -164,5 +169,12 @@ function mergeSavedConfig(
       parsed.physicsSpeed <= 2.5
         ? parsed.physicsSpeed
         : fallback.physicsSpeed,
+    introCameraStyle:
+      parsed.introCameraStyle === 'swoop90' ||
+      parsed.introCameraStyle === 'wide_zoom_tilt' ||
+      parsed.introCameraStyle === 'glide180' ||
+      parsed.introCameraStyle === 'low_flyover'
+        ? parsed.introCameraStyle
+        : fallback.introCameraStyle,
   };
 }

@@ -7,6 +7,7 @@ import {
   CourtOffsetConfig,
   DEFAULT_MAP_ID,
   fetchRemoteCourtConfig,
+  IntroCameraStyle,
   loadLocalCourtConfig,
   MAPS,
   persistCourtConfig,
@@ -50,6 +51,9 @@ const App: React.FC = () => {
   const [calibrateTab, setCalibrateTab] = useState<CalibratorTab>('camera');
   const [calibrateServeSlot, setCalibrateServeSlot] = useState<number>(0);
   const [cameraViewMode, setCameraViewMode] = useState<'pressbox' | 'first_person'>('pressbox');
+  const [introStyle, setIntroStyle] = useState<IntroCameraStyle>(
+    initialSaved.current.introCameraStyle
+  );
   const [courtOffset, setCourtOffset] = useState<CourtOffsetConfig>(
     initialSaved.current.courtOffset
   );
@@ -127,6 +131,7 @@ const App: React.FC = () => {
         sceneMgr.applySavedConfig(remote);
         setCourtOffset(remote.courtOffset);
         setPhysicsSpeed(remote.physicsSpeed);
+        setIntroStyle(remote.introCameraStyle);
         physicsSpeedRef.current = remote.physicsSpeed;
       });
 
@@ -402,6 +407,16 @@ const App: React.FC = () => {
             if (inst) {
               inst.sceneMgr.setCameraViewMode(mode);
               inst.human.root.visible = mode !== 'first_person';
+            }
+          }}
+          introStyle={introStyle}
+          onChangeIntroStyle={(style) => {
+            setIntroStyle(style);
+            const inst = engineRef.current;
+            if (inst) {
+              inst.sceneMgr.setIntroStyle(style);
+              inst.sceneMgr.startIntroSpin(style);
+              scheduleAutoSave();
             }
           }}
           courtOffset={courtOffset}

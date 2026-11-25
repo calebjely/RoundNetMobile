@@ -7,6 +7,7 @@ import { IRF_2026_RULES } from '../config/rules';
 import {
   CameraPreset,
   CourtOffsetConfig,
+  IntroCameraStyle,
   MapConfig,
   SavedCourtConfig,
 } from '../config/maps';
@@ -48,9 +49,10 @@ export class SceneManager {
   private onCourtOffsetSync?: (offset: CourtOffsetConfig) => void;
   private onCameraPresetChanged?: () => void;
 
-  // Starting game 360° intro spin animation
+  // Starting game cinematic camera intro animation
   private introSpinElapsed = -1;
-  private readonly introSpinDuration = 3.0;
+  private introSpinDuration = 4.2;
+  private introStyle: IntroCameraStyle = 'swoop90';
 
   private netDiscMesh!: THREE.Mesh;
   private netBasePositions!: Float32Array;
@@ -870,9 +872,21 @@ export class SceneManager {
     }
   }
 
-  public startIntroSpin(): void {
+  public startIntroSpin(style?: IntroCameraStyle): void {
     if (this.calibrateMode) return;
+    if (style) this.introStyle = style;
+    const durations: Record<IntroCameraStyle, number> = {
+      swoop90: 4.2,
+      wide_zoom_tilt: 4.2,
+      glide180: 4.8,
+      low_flyover: 4.0,
+    };
+    this.introSpinDuration = durations[this.introStyle];
     this.introSpinElapsed = 0;
+  }
+
+  public setIntroStyle(style: IntroCameraStyle): void {
+    this.introStyle = style;
   }
 
   public skipIntroSpin(): void {
@@ -885,6 +899,7 @@ export class SceneManager {
 
   public applySavedConfig(cfg: SavedCourtConfig): void {
     this.setCourtOffset(cfg.courtOffset);
+    this.introStyle = cfg.introCameraStyle;
     this.serveCameras = cfg.serveCameras.map((c) => ({
       position: [...c.position] as [number, number, number],
       target: [...c.target] as [number, number, number],
@@ -962,6 +977,7 @@ export class SceneManager {
         target: c.target.map(round) as [number, number, number],
       })) as [CameraPreset, CameraPreset, CameraPreset, CameraPreset],
       physicsSpeed: round(physicsSpeed),
+      introCameraStyle: this.introStyle,
     };
   }
 
@@ -1143,19 +1159,58 @@ export class SceneManager {
       return;
     }
 
-    // Starting game 360° court spin animation
+    // Starting game cinematic camera intro animation
     if (this.introSpinElapsed >= 0) {
       this.introSpinElapsed += dt;
       const t = Math.min(1, this.introSpinElapsed / this.introSpinDuration);
-      // Smooth easeInOutCubic
-      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      const spinAngle = (1 - ease) * Math.PI * 2;
-      const offset = this.baseCamPos.clone().sub(this.baseCamTarget);
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), spinAngle);
-      // Slight dramatic elevation lift during the mid-spin
-      offset.y += Math.sin(t * Math.PI) * 2.2;
-      this.currentCamPos.copy(this.baseCamTarget).add(offset);
-      this.currentCamTarget.copy(this.baseCamTarget);
+      // Smooth quintic ease-in-out for natural, non-dizzy motion
+      const ease = t < 0.5 ? 16 * t * t * t * t * t : 1 - Math.pow(-2 * t + 2, 5) / 2;
+      const easeOut = 1 - Math.pow(1 - t, 3);
+
+      const baseOffset = this.baseCamPos.clone().sub(this.baseCamTarget);
+      const desiredPos = new THREE.Vector3();
+      const desiredTarget = this.baseCamTarget.clone();
+
+      if (this.introStyle === 'wide_zoom_tilt') {
+        // Wide establishing view -> smooth zoom into court -> gentle downward tilt onto net
+        const zoomFactor = THREE.MathUtils.lerp(2.1, 1.0, ease);
+        const sideAngle = THREE.MathUtils.lerp(0.28, 0, ease);
+        const offset = baseOffset.clone().multiplyScalar(zoomFactor);
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), sideAngle);
+        // Start slightly lower/wider horizon, then tilt downward as we settle
+        offset.y *= THREE.MathUtils.lerp(0.78, 1.0, ease);
+        desiredTarget.y = THREE.MathUtils.lerp(1.85, this.baseCamTarget.y, easeOut);
+        desiredPos.copy(this.baseCamTarget).add(offset);
+      } else if (this.introStyle === 'glide180') {
+        // Slow, smooth 180° arc around the court showing off the Gaussian Splat
+        const angle = (1 - ease) * Math.PI;
+        const zoomFactor = THREE.MathUtils.lerp(1.25, 1.0, ease);
+        const offset = baseOffset.clone().multiplyScalar(zoomFactor);
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+        offset.y += Math.sin(t * Math.PI) * 1.1;
+        desiredPos.copy(this.baseCamTarget).add(offset);
+      } else if (this.introStyle === 'low_flyover') {
+        // Low grass-level skim swooping up into press-box view
+        const angle = (1 - ease) * (Math.PI * 0.35);
+        const zoomFactor = THREE.MathUtils.lerp(1.42, 1.0, easeOut);
+        const offset = baseOffset.clone().multiplyScalar(zoomFactor);
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+        offset.y = THREE.MathUtils.lerp(1.65, baseOffset.y, ease);
+        desiredTarget.y = THREE.MathUtils.lerp(1.05, this.baseCamTarget.y, ease);
+        desiredPos.copy(this.baseCamTarget).add(offset);
+      } else {
+        // 'swoop90' (default): Natural 90° swoop-in from a wider side angle
+        const angle = (1 - ease) * (Math.PI * 0.5);
+        const zoomFactor = THREE.MathUtils.lerp(1.38, 1.0, easeOut);
+        const offset = baseOffset.clone().multiplyScalar(zoomFactor);
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+        offset.y = THREE.MathUtils.lerp(baseOffset.y * 0.72, baseOffset.y, ease);
+        desiredTarget.y = THREE.MathUtils.lerp(1.15, this.baseCamTarget.y, easeOut);
+        desiredPos.copy(this.baseCamTarget).add(offset);
+      }
+
+      this.currentCamPos.copy(desiredPos);
+      this.currentCamTarget.copy(desiredTarget);
       this.camera.position.copy(this.currentCamPos);
       this.camera.lookAt(this.currentCamTarget);
       if (t >= 1) {

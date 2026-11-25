@@ -1,4 +1,5 @@
 import React from 'react';
+import { IntroCameraStyle } from '../config/maps';
 import { RULES_QUICK_REFERENCE } from '../config/rules';
 
 interface MenuDrawerProps {
@@ -9,9 +10,18 @@ interface MenuDrawerProps {
   pointsToWin: 15 | 21;
   cameraViewMode: 'pressbox' | 'first_person';
   onChangeCameraViewMode: (mode: 'pressbox' | 'first_person') => void;
+  introStyle: IntroCameraStyle;
+  onChangeIntroStyle: (style: IntroCameraStyle) => void;
   calibrateMode: boolean;
   onToggleCalibrate: () => void;
 }
+
+const INTRO_OPTIONS: { id: IntroCameraStyle; label: string }[] = [
+  { id: 'swoop90', label: '90° Swoop' },
+  { id: 'wide_zoom_tilt', label: 'Wide → Tilt' },
+  { id: 'glide180', label: '180° Glide' },
+  { id: 'low_flyover', label: 'Low Skim' },
+];
 
 export const MenuDrawer: React.FC<MenuDrawerProps> = ({
   open,
@@ -21,6 +31,8 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
   pointsToWin,
   cameraViewMode,
   onChangeCameraViewMode,
+  introStyle,
+  onChangeIntroStyle,
   calibrateMode,
   onToggleCalibrate,
 }) => {
@@ -109,6 +121,24 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
           >
             {calibrateMode ? 'Exit Scene Calibrator (F2)' : 'Toggle Scene Calibrator (F2)'}
           </button>
+        </div>
+
+        <div className="drawer-section">
+          <h3>Start Camera Intro</h3>
+          <div className="intro-grid">
+            {INTRO_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                className={`action-btn ${introStyle === opt.id ? 'active' : ''}`}
+                onClick={() => {
+                  onChangeIntroStyle(opt.id);
+                  onClose();
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="drawer-section">

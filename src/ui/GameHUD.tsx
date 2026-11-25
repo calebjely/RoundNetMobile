@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CourtOffsetConfig } from '../config/maps';
+import { CourtOffsetConfig, IntroCameraStyle } from '../config/maps';
 import { JoystickVisualState } from '../engine/InputManager';
 import { MatchHUDState, TimingPopup } from '../engine/MatchManager';
 import { OffscreenLandingHint } from '../engine/SceneManager';
@@ -23,6 +23,8 @@ interface GameHUDProps {
   onToggleCalibrate: () => void;
   cameraViewMode: 'pressbox' | 'first_person';
   onChangeCameraViewMode: (mode: 'pressbox' | 'first_person') => void;
+  introStyle: IntroCameraStyle;
+  onChangeIntroStyle: (style: IntroCameraStyle) => void;
   courtOffset: CourtOffsetConfig;
   physicsSpeed: number;
   onChangeOffset: (next: CourtOffsetConfig) => void;
@@ -48,6 +50,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onToggleCalibrate,
   cameraViewMode,
   onChangeCameraViewMode,
+  introStyle,
+  onChangeIntroStyle,
   courtOffset,
   physicsSpeed,
   onChangeOffset,
@@ -201,6 +205,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         pointsToWin={hud.pointsToWin}
         cameraViewMode={cameraViewMode}
         onChangeCameraViewMode={onChangeCameraViewMode}
+        introStyle={introStyle}
+        onChangeIntroStyle={onChangeIntroStyle}
         calibrateMode={calibrateMode}
         onToggleCalibrate={onToggleCalibrate}
       />
