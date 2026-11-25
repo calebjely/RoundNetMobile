@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { dyno, SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { OFFICIAL_BALL, OFFICIAL_NET } from '../config/equipment';
 import {
   CameraPreset,
@@ -161,6 +161,10 @@ export class SceneManager {
   private proceduralEnvGroup: THREE.Group | null = null;
   private hiddenFollowObstacles: THREE.Object3D[] = [];
   private readonly followRaycaster = new THREE.Raycaster();
+  private readonly splatBubbleCenter = new THREE.Vector3(0, 1.4, 0);
+  private readonly splatBubbleCenterDyno = dyno.dynoVec3(this.splatBubbleCenter);
+  private readonly splatBubbleRadiusDyno = dyno.dynoFloat(0.0);
+  private readonly splatBubbleMinYDyno = dyno.dynoFloat(0.32);
   private readonly gltfLoader = new GLTFLoader();
 
   constructor(container: HTMLElement, mapConfig: MapConfig, savedConfig?: SavedCourtConfig) {
@@ -543,6 +547,29 @@ export class SceneManager {
       const head = await fetch(this.mapConfig.splatUrl, { method: 'HEAD' });
       if (head.ok && !head.headers.get('content-type')?.includes('text/html')) {
         const splat = new SplatMesh({ url: this.mapConfig.splatUrl });
+        splat.worldModifier = dyno.dynoBlock(
+          { gsplat: dyno.Gsplat },
+          { gsplat: dyno.Gsplat },
+          ({ gsplat }) => {
+            if (!gsplat) return { gsplat };
+            const { center, opacity } = dyno.splitGsplat(gsplat).outputs;
+            const { y } = dyno.split(center).outputs;
+            const dist = dyno.length(dyno.sub(center, this.splatBubbleCenterDyno));
+            const insideBubble = dyno.and(
+              dyno.lessThan(dist, this.splatBubbleRadiusDyno),
+              dyno.greaterThan(y, this.splatBubbleMinYDyno)
+            );
+            const nextOpacity = dyno.select(
+              insideBubble,
+              dyno.dynoConst('float', 0.0),
+              opacity
+            );
+            return {
+              gsplat: dyno.combineGsplat({ gsplat, opacity: nextOpacity }),
+            };
+          }
+        );
+        splat.updateGenerator();
         this.courtGroup.add(splat);
         splatLoaded = true;
       }
@@ -1529,6 +1556,7 @@ export class SceneManager {
 
     if (this.calibrateMode) {
       if (this.calibrateTab === 'net' || this.cameraViewMode === 'pressbox') {
+        this.splatBubbleRadiusDyno.value = 0.0;
         if (Math.abs(this.camera.near - 0.1) > 0.005) {
           this.camera.near = 0.1;
           this.camera.updateProjectionMatrix();
@@ -1541,6 +1569,7 @@ export class SceneManager {
 
     // Starting game cinematic camera intro animation
     if (this.introSpinElapsed >= 0) {
+      this.splatBubbleRadiusDyno.value = 0.0;
       if (Math.abs(this.camera.near - 0.1) > 0.005) {
         this.camera.near = 0.1;
         this.camera.updateProjectionMatrix();
@@ -1676,7 +1705,12 @@ export class SceneManager {
       this.camera.position.copy(this.currentCamPos);
       this.camera.lookAt(this.currentCamTarget);
 
-      // Clip out any Gaussian Splat trees/bushes or procedural obstacles between camera and player
+      // Bubble around YOUR controlled player: hides any splat/tree above ground within radius of you
+      const bubbleR = Math.max(3.4, this.viewSettings.followBehindDist + 0.9);
+      this.splatBubbleCenter.set(humanPos.x, 1.35, humanPos.z);
+      this.splatBubbleRadiusDyno.value = bubbleR;
+
+      // Also clip anything strictly between camera and 0.65m behind player
       const playerChest = new THREE.Vector3(humanPos.x, 1.15, humanPos.z);
       const camToPlayerDist = this.currentCamPos.distanceTo(playerChest);
       const desiredNear = THREE.MathUtils.clamp(
@@ -1699,6 +1733,16 @@ export class SceneManager {
             this.hiddenFollowObstacles.push(h.object);
           }
         }
+        for (const child of this.proceduralEnvGroup.children) {
+          if (
+            child.name.startsWith('obstacle_') &&
+            child.visible &&
+            child.position.distanceTo(this.splatBubbleCenter) < bubbleR
+          ) {
+            child.visible = false;
+            this.hiddenFollowObstacles.push(child);
+          }
+        }
       }
       return;
     }
@@ -1709,6 +1753,8 @@ export class SceneManager {
     }
 
     if (this.cameraViewMode === 'first_person') {
+      this.splatBubbleCenter.set(humanPos.x, 1.4, humanPos.z);
+      this.splatBubbleRadiusDyno.value = 1.6;
       const eyeH = this.viewSettings.fpEyeHeight;
       const lookVec = ballPos.clone().sub(new THREE.Vector3(humanPos.x, eyeH, humanPos.z));
       const horizLook = new THREE.Vector3(lookVec.x, 0, lookVec.z);
