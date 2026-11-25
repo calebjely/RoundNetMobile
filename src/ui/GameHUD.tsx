@@ -70,6 +70,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onSaveNow,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPressed, setMenuPressed] = useState(false);
 
   return (
     <div className="hud-root">
@@ -114,14 +115,22 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       </div>
 
-      {/* Top Right Retro 3D Circular Menu Button */}
+      {/* Top Right Retro Game Boy Sprite Menu Button */}
       <button
         data-ui-interactive="true"
-        className="menu-btn retro-circle-btn"
+        className="menu-btn sprite-btn"
+        onPointerDown={() => setMenuPressed(true)}
+        onPointerUp={() => setMenuPressed(false)}
+        onPointerCancel={() => setMenuPressed(false)}
+        onPointerLeave={() => setMenuPressed(false)}
         onClick={() => setMenuOpen(true)}
         aria-label="Menu"
       >
-        <span className="circle-btn-icon">☰</span>
+        <img
+          src={menuPressed ? '/assets/ui/btn-menu-down.png' : '/assets/ui/btn-menu-up.png'}
+          alt="Menu"
+          draggable={false}
+        />
       </button>
 
       {isHumanBlocking && (
@@ -229,24 +238,37 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Bottom-Left Persistent 3D Arcade Cluster (Press-Box mode only) */}
+      {/* Bottom-Left Persistent Retro Game Boy Sprite Controls (Press-Box mode only) */}
       {cameraViewMode === 'pressbox' && (
         <div className="bottom-left-cluster">
           <button
             data-ui-interactive="true"
-            className={`return-net-btn retro-circle-btn ${returnToNetActive ? 'active' : ''}`}
+            className="return-net-btn sprite-btn"
             onPointerDown={() => onReturnToNetPress(true)}
             onPointerUp={() => onReturnToNetPress(false)}
             onPointerCancel={() => onReturnToNetPress(false)}
+            onPointerLeave={() => onReturnToNetPress(false)}
             aria-label="Move to net"
           >
-            <span className="circle-btn-icon">◎</span>
+            <img
+              src={returnToNetActive ? '/assets/ui/btn-net-down.png' : '/assets/ui/btn-net-up.png'}
+              alt=""
+              draggable={false}
+            />
           </button>
 
-          <div id="persistent-joystick-base" className="joystick-base-3d">
-            <div className="joystick-walk-ring" />
-            <div
-              className={`joystick-thumb-3d ${joystick.isSprint ? 'sprint' : ''}`}
+          <div id="persistent-joystick-base" className="joystick-sprite-base">
+            <img
+              className="joystick-base-img"
+              src="/assets/ui/joystick-base.png"
+              alt=""
+              draggable={false}
+            />
+            <img
+              className={`joystick-knob-img ${joystick.isSprint ? 'sprint' : ''}`}
+              src="/assets/ui/joystick-knob.png"
+              alt=""
+              draggable={false}
               style={{
                 transform: joystick.active
                   ? `translate(${joystick.thumbX - joystick.originX}px, ${joystick.thumbY - joystick.originY}px)`
