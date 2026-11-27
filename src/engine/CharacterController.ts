@@ -42,6 +42,89 @@ function findFirstSkinnedMesh(root: THREE.Object3D): THREE.SkinnedMesh | null {
   return found;
 }
 
+function retargetMixamoClip(
+  targetMesh: THREE.SkinnedMesh,
+  sourceMesh: THREE.SkinnedMesh,
+  srcClip: THREE.AnimationClip
+): THREE.AnimationClip {
+  const srcBones = new Map(sourceMesh.skeleton.bones.map((b) => [b.name, b]));
+  const tgtBones = new Map(targetMesh.skeleton.bones.map((b) => [b.name, b]));
+
+  const qSrcP = new THREE.Quaternion();
+  const qSrcW = new THREE.Quaternion();
+  const qTgtP = new THREE.Quaternion();
+  const qTgtW = new THREE.Quaternion();
+  const qSrc = new THREE.Quaternion();
+  const vSrc = new THREE.Vector3();
+  const outTracks: THREE.KeyframeTrack[] = [];
+
+  for (const track of srcClip.tracks) {
+    const dot = track.name.indexOf('.');
+    if (dot <= 0) continue;
+    const boneName = track.name.slice(0, dot).replace(/^\.bones\[([^\]]+)\]$/, '$1');
+    const prop = track.name.slice(dot + 1);
+
+    const bSrc = srcBones.get(boneName);
+    const bTgt = tgtBones.get(boneName);
+    if (!bSrc || !bTgt || !bSrc.parent || !bTgt.parent) continue;
+
+    bSrc.parent.getWorldQuaternion(qSrcP);
+    bSrc.getWorldQuaternion(qSrcW);
+    bTgt.parent.getWorldQuaternion(qTgtP);
+    bTgt.getWorldQuaternion(qTgtW);
+
+    if (prop === 'quaternion' && track instanceof THREE.QuaternionKeyframeTrack) {
+      const pre = qTgtP.clone().invert().multiply(qSrcP);
+      const post = qSrcW.clone().invert().multiply(qTgtW);
+      const values = new Float32Array(track.values.length);
+      for (let i = 0; i < track.values.length; i += 4) {
+        qSrc.set(track.values[i], track.values[i + 1], track.values[i + 2], track.values[i + 3]);
+        const qOut = pre.clone().multiply(qSrc).multiply(post).normalize();
+        values[i] = qOut.x;
+        values[i + 1] = qOut.y;
+        values[i + 2] = qOut.z;
+        values[i + 3] = qOut.w;
+      }
+      outTracks.push(
+        new THREE.QuaternionKeyframeTrack(
+          `${boneName}.quaternion`,
+          track.times.slice(),
+          values
+        )
+      );
+    } else if (
+      prop === 'position' &&
+      boneName === 'mixamorigHips' &&
+      track instanceof THREE.VectorKeyframeTrack
+    ) {
+      const srcScale = bSrc.parent.getWorldScale(new THREE.Vector3()).y || 0.01;
+      const qTgtPInv = qTgtP.clone().invert();
+      const values = new Float32Array(track.values.length);
+      for (let i = 0; i < track.values.length; i += 3) {
+        vSrc
+          .set(track.values[i], track.values[i + 1], track.values[i + 2])
+          .sub(bSrc.position)
+          .applyQuaternion(qSrcP)
+          .multiplyScalar(srcScale)
+          .applyQuaternion(qTgtPInv)
+          .add(bTgt.position);
+        values[i] = vSrc.x;
+        values[i + 1] = vSrc.y;
+        values[i + 2] = vSrc.z;
+      }
+      outTracks.push(
+        new THREE.VectorKeyframeTrack(
+          `${boneName}.position`,
+          track.times.slice(),
+          values
+        )
+      );
+    }
+  }
+
+  return new THREE.AnimationClip(srcClip.name.toLowerCase(), srcClip.duration, outTracks);
+}
+
 async function loadStarterTemplate(): Promise<LoadedTemplate | null> {
   if (!cachedTemplatePromise) {
     cachedTemplatePromise = (async () => {
@@ -87,22 +170,7 @@ async function loadStarterTemplate(): Promise<LoadedTemplate | null> {
             for (const srcClip of animGltf.animations) {
               const slotName = srcClip.name.toLowerCase();
               if (haveNames.has(slotName)) continue;
-              // Pre-wrap source tracks as .bones[name].prop so retargetClip's internal AnimationMixer(sourceMesh) animates sourceMesh
-              const preparedClip = srcClip.clone();
-              for (const t of preparedClip.tracks) {
-                const dot = t.name.indexOf('.');
-                if (dot > 0 && !t.name.startsWith('.bones[')) {
-                  t.name = `.bones[${t.name.slice(0, dot)}]${t.name.slice(dot)}`;
-                }
-              }
-              const retargeted = SkeletonUtils.retargetClip(targetMesh, sourceMesh, preparedClip, {
-                hip: 'mixamorigHips',
-                preserveBoneMatrix: true,
-              });
-              // Convert `.bones[mixamorigHips].quaternion` -> `mixamorigHips.quaternion` so AnimationMixer(cloned) binds all tracks
-              for (const track of retargeted.tracks) {
-                track.name = track.name.replace(/^\.bones\[([^\]]+)\]/, '$1');
-              }
+              const retargeted = retargetMixamoClip(targetMesh, sourceMesh, srcClip);
               retargeted.name = slotName;
               clips.push(retargeted);
             }
