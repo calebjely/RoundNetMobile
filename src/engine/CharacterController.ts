@@ -42,6 +42,17 @@ function findFirstSkinnedMesh(root: THREE.Object3D): THREE.SkinnedMesh | null {
   return found;
 }
 
+function getBoneWorldDir(bone: THREE.Object3D): THREE.Vector3 | null {
+  const child = bone.children.find((c) => (c as THREE.Bone).isBone);
+  if (!child) return null;
+  const va = new THREE.Vector3();
+  const vb = new THREE.Vector3();
+  bone.getWorldPosition(va);
+  child.getWorldPosition(vb);
+  const d = vb.sub(va);
+  return d.lengthSq() > 1e-6 ? d.normalize() : null;
+}
+
 function retargetMixamoClip(
   targetMesh: THREE.SkinnedMesh,
   sourceMesh: THREE.SkinnedMesh,
@@ -54,6 +65,7 @@ function retargetMixamoClip(
   const qSrcW = new THREE.Quaternion();
   const qTgtP = new THREE.Quaternion();
   const qTgtW = new THREE.Quaternion();
+  const qFix = new THREE.Quaternion();
   const qSrc = new THREE.Quaternion();
   const vSrc = new THREE.Vector3();
   const outTracks: THREE.KeyframeTrack[] = [];
@@ -74,6 +86,13 @@ function retargetMixamoClip(
     bTgt.getWorldQuaternion(qTgtW);
 
     if (prop === 'quaternion' && track instanceof THREE.QuaternionKeyframeTrack) {
+      // Align target rest limb direction (e.g. Meshy 50° A-pose) to source rest direction (Shannon T-pose)
+      const dSrc = getBoneWorldDir(bSrc);
+      const dTgt = getBoneWorldDir(bTgt);
+      if (dSrc && dTgt) {
+        qFix.setFromUnitVectors(dTgt, dSrc);
+        qTgtW.premultiply(qFix);
+      }
       const pre = qTgtP.clone().invert().multiply(qSrcP);
       const post = qSrcW.clone().invert().multiply(qTgtW);
       const values = new Float32Array(track.values.length);
