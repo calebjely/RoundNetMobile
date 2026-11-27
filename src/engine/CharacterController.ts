@@ -88,10 +88,14 @@ async function loadStarterTemplate(): Promise<LoadedTemplate | null> {
               const slotName = srcClip.name.toLowerCase();
               if (haveNames.has(slotName)) continue;
               const retargeted = SkeletonUtils.retargetClip(targetMesh, sourceMesh, srcClip, {
-                hip: 'mixamorig:Hips',
+                hip: 'mixamorigHips',
                 preserveBoneMatrix: true,
                 useFirstFramePosition: true,
               });
+              // Convert `.bones[mixamorigHips].quaternion` -> `mixamorigHips.quaternion` so AnimationMixer(cloned) binds all tracks
+              for (const track of retargeted.tracks) {
+                track.name = track.name.replace(/^\.bones\[([^\]]+)\]/, '$1');
+              }
               retargeted.name = slotName;
               clips.push(retargeted);
             }
@@ -235,10 +239,11 @@ export class CharacterController {
             this.actions.set(slot, action);
           }
         }
-        // Start immediately in idle pose
+        // Start immediately in idle pose (evaluate 1st frame right away so A-pose never shows)
         const idleAction = this.actions.get('idle');
         if (idleAction) {
-          idleAction.play();
+          idleAction.reset().play();
+          this.mixer.update(0.016);
           this.currentAction = idleAction;
           this.animState = 'idle';
         }
