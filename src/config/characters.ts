@@ -21,7 +21,8 @@ export interface CharacterProfile {
   stats: PlayerStats;
 }
 
-export const STARTER_MODEL_PATH = '/assets/characters/shannon.glb';
+export const STARTER_MODEL_PATH = '/assets/characters/player.glb';
+export const ANIMATION_SOURCE_PATH = '/assets/characters/shannon.glb';
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; hex: number; ringHex: number; label: string }> = {
   A: {

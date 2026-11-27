@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {
+  ANIMATION_SOURCE_PATH,
   MatchParticipantConfig,
   MOVEMENT_TUNING,
   STARTER_MODEL_PATH,
@@ -31,6 +32,16 @@ interface LoadedTemplate {
 
 let cachedTemplatePromise: Promise<LoadedTemplate | null> | null = null;
 
+function findFirstSkinnedMesh(root: THREE.Object3D): THREE.SkinnedMesh | null {
+  let found: THREE.SkinnedMesh | null = null;
+  root.traverse((obj) => {
+    if (!found && obj instanceof THREE.SkinnedMesh) {
+      found = obj;
+    }
+  });
+  return found;
+}
+
 async function loadStarterTemplate(): Promise<LoadedTemplate | null> {
   if (!cachedTemplatePromise) {
     cachedTemplatePromise = (async () => {
@@ -40,8 +51,54 @@ async function loadStarterTemplate(): Promise<LoadedTemplate | null> {
           return null;
         }
         const loader = new GLTFLoader();
-        const gltf = await loader.loadAsync(STARTER_MODEL_PATH);
-        return { scene: gltf.scene, animations: gltf.animations || [] };
+        const [playerGltf, animGltf] = await Promise.all([
+          loader.loadAsync(STARTER_MODEL_PATH),
+          loader.loadAsync(ANIMATION_SOURCE_PATH).catch(() => null),
+        ]);
+
+        playerGltf.scene.updateMatrixWorld(true);
+        const clips: THREE.AnimationClip[] = [];
+
+        // Keep native Walking / Running clips from player.glb mapped to walk / sprint
+        const nativeWalk = playerGltf.animations?.find((c) =>
+          c.name.toLowerCase().includes('walk')
+        );
+        if (nativeWalk) {
+          const c = nativeWalk.clone();
+          c.name = 'walk';
+          clips.push(c);
+        }
+        const nativeRun = playerGltf.animations?.find((c) =>
+          c.name.toLowerCase().includes('run')
+        );
+        if (nativeRun) {
+          const c = nativeRun.clone();
+          c.name = 'sprint';
+          clips.push(c);
+        }
+
+        // Retarget all remaining Roundnet animations (idle, dive, get_up, block, hit_*, spike, serve_*)
+        if (animGltf && animGltf.animations?.length) {
+          animGltf.scene.updateMatrixWorld(true);
+          const targetMesh = findFirstSkinnedMesh(playerGltf.scene);
+          const sourceMesh = findFirstSkinnedMesh(animGltf.scene);
+          if (targetMesh && sourceMesh) {
+            const haveNames = new Set(clips.map((c) => c.name));
+            for (const srcClip of animGltf.animations) {
+              const slotName = srcClip.name.toLowerCase();
+              if (haveNames.has(slotName)) continue;
+              const retargeted = SkeletonUtils.retargetClip(targetMesh, sourceMesh, srcClip, {
+                hip: 'mixamorig:Hips',
+                preserveBoneMatrix: true,
+                useFirstFramePosition: true,
+              });
+              retargeted.name = slotName;
+              clips.push(retargeted);
+            }
+          }
+        }
+
+        return { scene: playerGltf.scene, animations: clips };
       } catch {
         return null;
       }
