@@ -87,17 +87,10 @@ async function loadStarterTemplate(): Promise<LoadedTemplate | null> {
             for (const srcClip of animGltf.animations) {
               const slotName = srcClip.name.toLowerCase();
               if (haveNames.has(slotName)) continue;
-              // Pre-wrap source tracks as .bones[name].prop so retargetClip's internal AnimationMixer(sourceMesh) animates sourceMesh
-              const preparedClip = srcClip.clone();
-              for (const t of preparedClip.tracks) {
-                const dot = t.name.indexOf('.');
-                if (dot > 0 && !t.name.startsWith('.bones[')) {
-                  t.name = `.bones[${t.name.slice(0, dot)}]${t.name.slice(dot)}`;
-                }
-              }
-              const retargeted = SkeletonUtils.retargetClip(targetMesh, sourceMesh, preparedClip, {
+              const retargeted = SkeletonUtils.retargetClip(targetMesh, sourceMesh, srcClip, {
                 hip: 'mixamorigHips',
                 preserveBoneMatrix: true,
+                useFirstFramePosition: true,
               });
               // Convert `.bones[mixamorigHips].quaternion` -> `mixamorigHips.quaternion` so AnimationMixer(cloned) binds all tracks
               for (const track of retargeted.tracks) {
